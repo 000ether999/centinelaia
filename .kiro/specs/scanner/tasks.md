@@ -155,8 +155,8 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
 - [x] 9. Checkpoint - Verificar módulos de escaneo
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 10. Store de DynamoDB
-  - [ ] 10.1 Implementar `backend/services/scanner/store.ts`
+- [x] 10. Store de DynamoDB
+  - [x] 10.1 Implementar `backend/services/scanner/store.ts`
     - Crear `createDynamoStore(tableName)` que retorna ScanStore
     - Implementar `put(result)`: PutItem con reintentos (max 2) y backoff exponencial (100ms → 400ms)
     - Implementar truncamiento si item > 390KB: recortar rawValue de Findings "info", agregar `truncated: true`
@@ -174,8 +174,8 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Mockear @aws-sdk/lib-dynamodb (DynamoDBDocumentClient)
     - _Requirements: 10.1, 10.5, 14.6_
 
-- [ ] 11. Lambda Handler — Integración final
-  - [ ] 11.1 Implementar `backend/handlers/scan-handler.ts`
+- [x] 11. Lambda Handler — Integración final
+  - [x] 11.1 Implementar `backend/handlers/scan-handler.ts`
     - Parsear APIGatewayProxyEvent: extraer method + path
     - Ruta POST /scan: parsear body JSON → validateScanRequest → resolveAndCheckIp → executeScan → store.put → responder 200
     - Ruta GET /scan/{scanId}: store.get → responder 200 o 404
@@ -195,7 +195,7 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Mockear orchestrator y store para aislar handler
     - _Requirements: 11.1, 11.2, 11.3, 11.6, 14.6_
 
-- [ ] 12. Checkpoint final - Verificar integración completa
+- [x] 12. Checkpoint final - Verificar integración completa
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
