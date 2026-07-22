@@ -71,8 +71,8 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
 - [x] 5. Checkpoint - Verificar base funcional
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 6. Módulos de verificación — Header Analyzer y Fingerprinter
-  - [~] 6.1 Implementar `backend/services/scanner/modules/header-analyzer.ts`
+- [x] 6. Módulos de verificación — Header Analyzer y Fingerprinter
+  - [x] 6.1 Implementar `backend/services/scanner/modules/header-analyzer.ts`
     - Crear factory `createHeaderAnalyzer()` que retorna ScanModule
     - Hacer GET al targetUrl con redirecciones automáticas DESHABILITADAS (`redirect: 'manual'`)
     - Al recibir respuesta 3xx con header Location: extraer host/IP de destino, llamar a `resolveAndCheckIp()` para validar que no sea IP privada/reservada. Si la IP es válida, seguir la redirección manualmente. Si la IP es prohibida, abortar el seguimiento y generar Finding con severity "medium", categoría "http-headers", indicando que se bloqueó una redirección SSRF
@@ -82,7 +82,7 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Generar Finding por header con valor seguro (severity "info")
     - _Requirements: 2.5, 4.1, 4.2, 4.3, 4.4, 4.6, 12.1_
 
-  - [~] 6.2 Implementar `backend/services/scanner/modules/fingerprinter.ts`
+  - [x] 6.2 Implementar `backend/services/scanner/modules/fingerprinter.ts`
     - Crear factory `createFingerprinter()` que retorna ScanModule
     - Hacer GET al targetUrl con redirecciones automáticas DESHABILITADAS (`redirect: 'manual'`)
     - Al recibir respuesta 3xx con header Location: extraer host/IP de destino, llamar a `resolveAndCheckIp()` para validar que no sea IP privada/reservada. Si la IP es válida, seguir la redirección manualmente. Si la IP es prohibida, abortar el seguimiento y generar Finding con severity "medium", categoría "server-fingerprint", indicando que se bloqueó una redirección SSRF
@@ -103,8 +103,8 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Mockear `http.get` / `fetch` para respuestas simuladas (incluyendo 302 con Location a IP interna)
     - _Requirements: 2.5, 14.1, 14.5, 14.6_
 
-- [ ] 7. Módulos de verificación — TLS Checker y Cookie Inspector
-  - [ ] 7.1 Implementar `backend/services/scanner/modules/tls-checker.ts`
+- [x] 7. Módulos de verificación — TLS Checker y Cookie Inspector
+  - [x] 7.1 Implementar `backend/services/scanner/modules/tls-checker.ts`
     - Crear factory `createTlsChecker()` que retorna ScanModule
     - Usar `tls.connect()` nativo para verificar versiones de protocolo (TLS 1.0-1.3)
     - Reportar SSLv2/SSLv3 como "info" (no testable directamente desde Node 20)
@@ -113,7 +113,7 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Manejar timeout de conexión → Finding "critical"
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 5.10, 5.11, 12.1_
 
-  - [ ] 7.2 Implementar `backend/services/scanner/modules/cookie-inspector.ts`
+  - [x] 7.2 Implementar `backend/services/scanner/modules/cookie-inspector.ts`
     - Crear factory `createCookieInspector()` que retorna ScanModule
     - Hacer GET al targetUrl con redirecciones automáticas DESHABILITADAS (`redirect: 'manual'`)
     - Seguir redirecciones manualmente hasta 5 saltos: al recibir 3xx con Location, extraer host/IP de destino, llamar a `resolveAndCheckIp()` para validar. Si la IP es válida, seguir. Si la IP es prohibida, abortar la cadena de redirecciones y generar Finding con severity "medium", categoría "cookies", indicando bloqueo SSRF; analizar cookies recolectadas hasta ese punto
@@ -134,8 +134,8 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Mockear `tls.connect` y `http.get` (no conexiones reales); mockear `resolveAndCheckIp` para simular IP prohibida
     - _Requirements: 2.5, 14.2, 14.3, 14.6_
 
-- [ ] 8. Módulo de verificación — DNS Checker
-  - [ ] 8.1 Implementar `backend/services/scanner/modules/dns-checker.ts`
+- [x] 8. Módulo de verificación — DNS Checker
+  - [x] 8.1 Implementar `backend/services/scanner/modules/dns-checker.ts`
     - Crear factory `createDnsChecker()` que retorna ScanModule
     - Si `input.isIpAddress === true`, retornar Finding "info" indicando que DNS no aplica para IPs
     - Usar `dns.promises.resolveTxt(domain)` para buscar registro SPF (prefijo "v=spf1")
@@ -152,7 +152,7 @@ Plan de implementación incremental del módulo Scanner. Cada tarea construye so
     - Mockear `dns.promises.resolveTxt` con respuestas simuladas
     - _Requirements: 14.4, 14.6_
 
-- [ ] 9. Checkpoint - Verificar módulos de escaneo
+- [x] 9. Checkpoint - Verificar módulos de escaneo
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 10. Store de DynamoDB
