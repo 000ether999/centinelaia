@@ -1,0 +1,24 @@
+{
+  "name": "centinelaia",
+  "version": "1.0.0",
+  "description": "CentinelaIA — Auditor de seguridad web potenciado por IA",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.162",
+    "@types/node": "22.15.29",
+    "@types/uuid": "10.0.0",
+    "typescript": "5.8.3",
+    "vitest": "3.2.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.750.0",
+    "@aws-sdk/lib-dynamodb": "3.750.0",
+    "uuid": "11.1.0"
+  }
+}

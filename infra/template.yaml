@@ -1,0 +1,81 @@
+# infra/template.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CentinelaIA Scanner - Motor de escaneo de seguridad web
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        SCANS_TABLE: !Ref ScansTable
+
+Resources:
+  ScanFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/scan-handler.handler
+      CodeUri: backend/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScansTable
+      Events:
+        PostScan:
+          Type: HttpApi
+          Properties:
+            Path: /scan
+            Method: POST
+            ApiId: !Ref ScanHttpApi
+        GetScanById:
+          Type: HttpApi
+          Properties:
+            Path: /scan/{scanId}
+            Method: GET
+            ApiId: !Ref ScanHttpApi
+        GetScansBySession:
+          Type: HttpApi
+          Properties:
+            Path: /scan
+            Method: GET
+            ApiId: !Ref ScanHttpApi
+
+  ScanHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      RouteSettings:
+        "POST /scan":
+          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: 5
+
+  ScansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: centinelaia-scans
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: scanId
+          AttributeType: S
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: scanId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: sessionId-timestamp-index
+          KeySchema:
+            - AttributeName: sessionId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+Outputs:
+  ScanApiUrl:
+    Description: URL del API de escaneo
+    Value: !Sub "https://${ScanHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
