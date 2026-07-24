@@ -57,8 +57,9 @@ export function createSecurityTxtChecker(): ScanModule {
         // Ambos non-200 → ausente
         return [finding('low', null, 'security.txt not found — consider adding per RFC 9116')];
       } catch (error) {
-        // Error de red/timeout → info, sin propagar
-        return [finding('info', null, `security.txt check failed: ${errorMsg(error)}`)];
+        // Error de red/timeout → info, loguear detalle sin exponerlo en el finding
+        console.warn(`[security-txt-checker] security.txt check failed:`, errorMsg(error));
+        return [finding('info', null, `security.txt check failed: connection to target failed`)];
       }
     },
   };

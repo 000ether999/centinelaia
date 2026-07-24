@@ -133,9 +133,10 @@ function correlatePortWithTls(nmapRows: DetectedNmapRow[], allFindings: Finding[
  * Regla 2: enlaza un servicio con versión detectada en Nmap con un CVE
  * generado por el cve-enricher para ese mismo producto+versión.
  * El cve-enricher construye la descripción del CVE como
- * "{product} {version}: {resumen}", donde product/version provienen
- * exactamente del mismo rawValue JSON de la fila de Nmap (ver extract-software.ts),
- * lo que permite un match determinista por prefijo.
+ * "[coincidencia aproximada] {product} {version}: {resumen}", donde
+ * product/version provienen del mismo rawValue JSON de la fila de Nmap
+ * (ver extract-software.ts). El match busca que la descripción del CVE
+ * contenga el string "product version:" (con o sin prefijo de calificador).
  */
 function correlateVersionWithCves(nmapRows: DetectedNmapRow[], allFindings: Finding[]): Finding[] {
   const correlations: Finding[] = [];
@@ -145,10 +146,25 @@ function correlateVersionWithCves(nmapRows: DetectedNmapRow[], allFindings: Find
   for (const row of nmapRows) {
     if (!row.version) continue;
 
-    const prefix = `${row.service.toLowerCase()} ${row.version}:`.toLowerCase();
+    // Construir patrones de búsqueda:
+    // 1. service + version (legacy: cuando service es el producto real)
+    // 2. Cada palabra del version como producto potencial (para services genéricos)
+    const searchPatterns: string[] = [];
+    const servicePrefix = `${row.service.toLowerCase()} ${row.version}:`.toLowerCase();
+    searchPatterns.push(servicePrefix);
+
+    // Si el service es genérico (http/https/ssl/tls/unknown), también buscar
+    // el contenido del version field directamente como "{producto} {ver}:"
+    const genericServices = new Set(['http', 'https', 'ssl', 'tls', 'unknown']);
+    if (genericServices.has(row.service.toLowerCase()) && row.version.includes(' ')) {
+      // version podría ser "nginx 1.18.0" → buscar "nginx 1.18.0:"
+      searchPatterns.push(`${row.version.toLowerCase()}:`);
+    }
 
     for (const cve of cveFindings) {
-      if (!cve.description.toLowerCase().startsWith(prefix)) continue;
+      const descLower = cve.description.toLowerCase();
+      const matches = searchPatterns.some((pattern) => descLower.includes(pattern));
+      if (!matches) continue;
 
       const cveId = cve.rawValue?.split(' ')[0] ?? 'un CVE conocido';
       const description = clampDescription(

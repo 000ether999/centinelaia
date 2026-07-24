@@ -38,13 +38,14 @@ export function createFingerprinter(): ScanModule {
       try {
         response = await fetchWithSsrfProtection(input.targetUrl, input.timeoutMs, findings);
       } catch (error: unknown) {
-        // Req 8.6: Error de conexión → Finding info con el error
+        // Req 8.6: Error de conexión → Finding info con mensaje genérico
         const errorMessage = error instanceof Error ? error.message : String(error);
+        console.warn(`[fingerprinter] Connection failed:`, errorMessage);
         findings.push({
           category: 'server-fingerprint',
           severity: 'info',
           rawValue: null,
-          description: `No se pudo realizar el fingerprinting del servidor: ${errorMessage}`,
+          description: `No se pudo realizar el fingerprinting del servidor: conexión fallida`,
         });
         return findings;
       }

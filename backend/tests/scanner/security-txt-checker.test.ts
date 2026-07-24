@@ -95,6 +95,8 @@ describe('security-txt-checker', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]!.severity).toBe('info');
     expect(findings[0]!.description).toContain('security.txt check failed');
+    // No debe exponer el mensaje de error interno
+    expect(findings[0]!.description).not.toContain('fetch failed');
   });
 
   it('should use the origin (not full URL with path) for requests', async () => {

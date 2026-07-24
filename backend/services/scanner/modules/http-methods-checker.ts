@@ -70,8 +70,9 @@ export function createHttpMethodsChecker(): ScanModule {
             : `Dangerous HTTP method exposed: ${m}`,
         ));
       } catch (error) {
-        // Error de red/timeout → info, sin propagar
-        return [finding('info', null, `HTTP methods check failed: ${errorMsg(error)}`)];
+        // Error de red/timeout → info, loguear detalle sin exponerlo en el finding
+        console.warn(`[http-methods-checker] HTTP methods check failed:`, errorMsg(error));
+        return [finding('info', null, `HTTP methods check failed: connection to target failed`)];
       }
     },
   };

@@ -115,5 +115,7 @@ describe('cors-checker', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]!.severity).toBe('info');
     expect(findings[0]!.description).toContain('CORS check failed');
+    // No debe exponer el mensaje de error interno
+    expect(findings[0]!.description).not.toContain('fetch failed');
   });
 });

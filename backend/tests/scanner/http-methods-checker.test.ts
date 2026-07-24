@@ -120,5 +120,7 @@ describe('http-methods-checker', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]!.severity).toBe('info');
     expect(findings[0]!.description).toContain('HTTP methods check failed');
+    // No debe exponer el mensaje de error interno
+    expect(findings[0]!.description).not.toContain('fetch failed');
   });
 });

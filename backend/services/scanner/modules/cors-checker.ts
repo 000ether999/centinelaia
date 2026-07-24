@@ -63,8 +63,9 @@ export function createCorsChecker(): ScanModule {
         // Caso 3: Restrictivo → info
         return [finding('info', acao, 'CORS policy is restrictive')];
       } catch (error) {
-        // Error de red/timeout → info, sin propagar
-        return [finding('info', null, `CORS check failed: ${errorMsg(error)}`)];
+        // Error de red/timeout → info, loguear detalle sin exponerlo en el finding
+        console.warn(`[cors-checker] CORS check failed:`, errorMsg(error));
+        return [finding('info', null, `CORS check failed: connection to target failed`)];
       }
     },
   };

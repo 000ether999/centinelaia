@@ -174,12 +174,14 @@ function determineStatus(
  * Genera un Finding de error cuando un módulo lanza una excepción.
  */
 function createErrorFinding(mod: ScanModule, error: unknown): Finding {
+  // Loguear detalle interno para debugging, sin exponerlo en el finding
   const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[orchestrator] Module ${mod.name} failed:`, message);
   return {
     category: mod.category,
     severity: 'info',
-    rawValue: message,
-    description: `Module ${mod.name} failed: ${message}`,
+    rawValue: null,
+    description: `Module ${mod.name} encountered an unexpected error`,
   };
 }
 

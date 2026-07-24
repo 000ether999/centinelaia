@@ -168,11 +168,12 @@ async function checkProtocols(
     resolvedIp = resolved.ip;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[tls-checker] Cannot resolve host for TLS verification:`, message);
     findings.push({
       category: 'tls-ssl',
       severity: 'critical',
       rawValue: null,
-      description: `Cannot resolve host for TLS verification: ${message}`,
+      description: `Cannot resolve host for TLS verification: DNS resolution failed`,
     });
     return findings;
   }
@@ -295,11 +296,12 @@ async function checkCipherAndCertificate(
     resolvedIp = resolved.ip;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[tls-checker] Cannot resolve host for cipher/certificate verification:`, message);
     findings.push({
       category: 'tls-ssl',
       severity: 'critical',
       rawValue: null,
-      description: `Cannot resolve host for cipher/certificate verification: ${message}`,
+      description: `Cannot resolve host for cipher/certificate verification: DNS resolution failed`,
     });
     return findings;
   }

@@ -209,13 +209,14 @@ export function createHeaderAnalyzer(): ScanModule {
         const headerFindings = analyzeSecurityHeaders(response.headers);
         findings.push(...headerFindings);
       } catch (error) {
-        // En caso de timeout u otro error de red, generar un finding informativo
+        // En caso de timeout u otro error de red, loguear detalle y generar finding genérico
         const message = error instanceof Error ? error.message : 'Unknown error';
+        console.warn(`[header-analyzer] Unable to analyze headers:`, message);
         findings.push({
           category: 'http-headers',
           severity: 'medium',
           rawValue: null,
-          description: `Unable to analyze headers: ${message}`,
+          description: `Unable to analyze headers: connection to target failed`,
         });
       }
 

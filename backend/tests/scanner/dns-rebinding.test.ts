@@ -206,8 +206,9 @@ describe('DNS Rebinding Protection — tls-checker', () => {
     });
 
     // Debe haber un finding crítico indicando que no se pudo resolver/conectar
+    // (el detalle del error se loguea internamente, no se expone en el finding)
     const blockFinding = findings.find(
-      f => f.severity === 'critical' && f.description.includes('DNS rebinding blocked'),
+      f => f.severity === 'critical' && f.description.includes('DNS resolution failed'),
     );
     expect(blockFinding).toBeDefined();
   });
@@ -227,7 +228,7 @@ describe('DNS Rebinding Protection — tls-checker', () => {
     });
 
     const blockFinding = findings.find(
-      f => f.severity === 'critical' && f.description.includes('DNS rebinding blocked'),
+      f => f.severity === 'critical' && f.description.includes('DNS resolution failed'),
     );
     expect(blockFinding).toBeDefined();
   });
