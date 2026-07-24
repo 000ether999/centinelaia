@@ -14,6 +14,7 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set<FindingCategory>([
   'cookies',
   'dns-security',
   'server-fingerprint',
+  'log-analysis',
 ]);
 
 const VALID_SEVERITIES: ReadonlySet<string> = new Set<FindingSeverity>([

@@ -12,7 +12,8 @@ export type FindingCategory =
   | 'tls-ssl'
   | 'cookies'
   | 'dns-security'
-  | 'server-fingerprint';
+  | 'server-fingerprint'
+  | 'log-analysis';
 
 /**
  * Niveles de severidad ordenados de mayor a menor impacto.

@@ -6,6 +6,7 @@
 
 import type { Finding } from '../scanner/modules/types.js';
 import { translateNmapOutput } from './nmap-parser.js';
+import { translateAuthLog } from './authlog-parser.js';
 
 /** Límite impuesto por el validator del AI Engine para sourceContext. */
 const MAX_SOURCE_CONTEXT_LENGTH = 200;
@@ -15,6 +16,8 @@ export interface MergeInput {
   findings: Finding[];
   /** Salida cruda de Nmap (opcional). Si viene, se traduce y fusiona. */
   nmapOutput?: string;
+  /** Texto de log de autenticación (opcional). Si viene, se traduce y fusiona. */
+  authLog?: string;
   /** sourceContext original del cliente (opcional). */
   sourceContext?: string;
 }
@@ -27,31 +30,33 @@ export interface MergeResult {
 }
 
 /**
- * Fusiona findings directos con findings derivados de nmapOutput.
- * Si no hay nmapOutput, retorna los findings originales sin cambios.
+ * Fusiona findings directos con findings derivados de nmapOutput y/o authLog.
+ * Si no hay logs externos, retorna los findings originales sin cambios.
  */
 export function mergeFindings(input: MergeInput): MergeResult {
-  const { findings, nmapOutput, sourceContext } = input;
+  const { findings, nmapOutput, authLog, sourceContext } = input;
 
-  // Si no hay salida de Nmap, retornar sin cambios
-  if (!nmapOutput || !nmapOutput.trim()) {
+  // Si no hay salida de Nmap ni authLog, retornar sin cambios
+  if ((!nmapOutput || !nmapOutput.trim()) && (!authLog || !authLog.trim())) {
     return {
       mergedFindings: findings,
       mergedSourceContext: sourceContext,
     };
   }
 
-  // Traducir la salida de Nmap a findings estructurados
-  const nmapFindings = translateNmapOutput(nmapOutput);
+  // Traducir fuentes externas
+  const nmapFindings = nmapOutput?.trim() ? translateNmapOutput(nmapOutput) : [];
+  const authFindings = authLog?.trim() ? translateAuthLog(authLog) : [];
 
-  // Fusionar: findings directos primero, luego findings de Nmap
-  const mergedFindings = [...findings, ...nmapFindings];
+  // Fusionar: findings directos primero, luego Nmap, luego auth.log
+  const mergedFindings = [...findings, ...nmapFindings, ...authFindings];
 
   // Construir sourceContext enriquecido respetando el límite de 200 chars
   const mergedSourceContext = buildMergedSourceContext(
     sourceContext,
     findings.length,
     nmapFindings.length,
+    authFindings.length,
   );
 
   return { mergedFindings, mergedSourceContext };
@@ -65,22 +70,28 @@ function buildMergedSourceContext(
   originalContext: string | undefined,
   directCount: number,
   nmapCount: number,
+  authCount: number = 0,
 ): string {
-  // Si solo hay findings de Nmap (sin directos del scanner)
-  if (directCount === 0 && nmapCount > 0) {
-    const ctx = `Análisis de ${nmapCount} hallazgos de log Nmap.`;
+  const sources: string[] = [];
+  if (directCount > 0) sources.push(`scanner (${directCount})`);
+  if (nmapCount > 0) sources.push(`Nmap (${nmapCount})`);
+  if (authCount > 0) sources.push(`auth.log (${authCount})`);
+
+  // Caso simple: una sola fuente externa sin findings directos
+  if (sources.length === 1 && directCount === 0) {
+    const ctx = `Análisis de ${nmapCount + authCount} hallazgos de ${nmapCount > 0 ? 'log Nmap' : 'auth.log'}.`;
     return ctx.slice(0, MAX_SOURCE_CONTEXT_LENGTH);
   }
 
-  // Hay ambas fuentes — correlación real
+  // Múltiples fuentes — correlación
   const base = originalContext
-    ? `${originalContext} + log Nmap (${nmapCount} hallazgos).`
-    : `Correlación: ${directCount} hallazgos del scanner + ${nmapCount} de log Nmap.`;
+    ? `${originalContext} + ${sources.filter((s) => !s.startsWith('scanner')).join(' + ')}.`
+    : `Correlación: ${sources.join(' + ')}.`;
 
-  // Si hay dos fuentes, indicarlo explícitamente para el prompt
+  // Fallback si es demasiado largo
   const multiSource = base.length <= MAX_SOURCE_CONTEXT_LENGTH
     ? base
-    : `Scanner (${directCount}) + Nmap (${nmapCount}). Correlacionar hallazgos entre fuentes.`;
+    : `${sources.join(' + ')}. Correlacionar hallazgos entre fuentes.`;
 
   return multiSource.slice(0, MAX_SOURCE_CONTEXT_LENGTH);
 }

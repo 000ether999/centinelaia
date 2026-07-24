@@ -49,10 +49,15 @@
 
     <section class="panel" aria-labelledby="nmapTitle">
       <div class="section-heading">
-        <div><p class="eyebrow">Flujo 2</p><h2 id="nmapTitle">Interpretar salida de Nmap</h2></div>
+        <div><p class="eyebrow">Flujo 2</p><h2 id="nmapTitle">Interpretar log externo</h2></div>
       </div>
       <form id="nmapForm">
-        <label for="nmapOutput">Salida de Nmap</label>
+        <label for="logType">Tipo de log</label>
+        <select id="logType" name="logType">
+          <option value="nmap" selected>Nmap</option>
+          <option value="authlog">auth.log / fail2ban</option>
+        </select>
+        <label for="nmapOutput">Contenido del log</label>
         <textarea id="nmapOutput" name="nmapOutput" rows="9" required
           placeholder="PORT     STATE SERVICE VERSION&#10;22/tcp   open  ssh     OpenSSH 9.6"></textarea>
         <label for="nmapFile">O cargar un archivo de texto</label>
@@ -63,7 +68,7 @@
         </label>
         <button id="nmapButton" type="submit">Traducir y analizar</button>
       </form>
-      <p id="nmapStatus" class="status" role="status" aria-live="polite">Esperando una salida de Nmap.</p>
+      <p id="nmapStatus" class="status" role="status" aria-live="polite">Esperando un log externo.</p>
     </section>
 
     <section id="resultsPanel" class="panel" aria-labelledby="resultsTitle" hidden>

@@ -13,6 +13,7 @@ const elements = {
   analyzeStep: document.querySelector('#analyzeStep'),
   scanStatus: document.querySelector('#scanStatus'),
   nmapForm: document.querySelector('#nmapForm'),
+  logType: document.querySelector('#logType'),
   nmapOutput: document.querySelector('#nmapOutput'),
   nmapFile: document.querySelector('#nmapFile'),
   nmapButton: document.querySelector('#nmapButton'),
@@ -203,20 +204,22 @@ async function runScannerFlow() {
 
 async function runNmapFlow() {
   setBusy(true);
-  setStatus(elements.nmapStatus, 'Analizando la salida de Nmap…');
+  const selectedType = elements.logType?.value ?? 'nmap';
+  const logContent = elements.nmapOutput.value;
+  const isAuthLog = selectedType === 'authlog';
+  setStatus(elements.nmapStatus, isAuthLog ? 'Analizando el log de autenticación…' : 'Analizando la salida de Nmap…');
   try {
-    // Usar el endpoint correlacionado: envía nmapOutput directo a /analyze
-    // que traduce + analiza en una sola llamada.
+    // Construir payload según el tipo de log seleccionado
     const payload = {
       findings: [],
       sessionId,
-      nmapOutput: elements.nmapOutput.value,
+      ...(isAuthLog ? { authLog: logContent } : { nmapOutput: logContent }),
     };
 
     // Si hay un escaneo reciente en memoria, correlacionar con esos findings
     if (lastScanFindings && lastScanFindings.length > 0 && elements.correlateCheckbox?.checked) {
       payload.findings = lastScanFindings;
-      setStatus(elements.nmapStatus, 'Correlacionando con el último escaneo + Nmap…');
+      setStatus(elements.nmapStatus, `Correlacionando con el último escaneo + ${isAuthLog ? 'auth.log' : 'Nmap'}…`);
     }
 
     const analysis = await requestJson('/analyze', {
@@ -224,22 +227,20 @@ async function runNmapFlow() {
       body: JSON.stringify(payload),
     });
 
-    // Reconstruir la lista de findings para renderizar (directos + los de Nmap fusionados)
+    // Reconstruir la lista de findings para renderizar (directos + los fusionados)
     const totalFindings = [...payload.findings];
-    // Los findings de Nmap fueron fusionados en el backend; las explanations cubren todos
-    // Agregamos placeholders para renderizar correctamente los índices de Nmap
-    const nmapFindingsCount = (analysis.explanations?.length ?? 0) - payload.findings.length;
-    for (let i = 0; i < nmapFindingsCount; i++) {
+    const externalFindingsCount = (analysis.explanations?.length ?? 0) - payload.findings.length;
+    for (let i = 0; i < externalFindingsCount; i++) {
       totalFindings.push({
-        category: 'server-fingerprint',
-        severity: 'low',
-        description: `Hallazgo #${payload.findings.length + i + 1} derivado de la salida de Nmap.`,
+        category: isAuthLog ? 'log-analysis' : 'server-fingerprint',
+        severity: isAuthLog ? 'medium' : 'low',
+        description: `Hallazgo #${payload.findings.length + i + 1} derivado del ${isAuthLog ? 'log de autenticación' : 'log de Nmap'}.`,
         rawValue: null,
       });
     }
 
     renderAnalysis(totalFindings, analysis);
-    setStatus(elements.nmapStatus, 'Salida de Nmap analizada correctamente.');
+    setStatus(elements.nmapStatus, isAuthLog ? 'Log de autenticación analizado correctamente.' : 'Salida de Nmap analizada correctamente.');
   } catch (error) {
     setStatus(elements.nmapStatus, error.message, true);
   } finally {

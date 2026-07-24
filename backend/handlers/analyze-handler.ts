@@ -118,26 +118,28 @@ async function handlePostAnalyze(
     return jsonResponse(400, { error: 'Request body must be valid JSON' });
   }
 
-  // Si viene nmapOutput, fusionar findings antes de invocar el análisis
-  if (
-    body &&
-    typeof body === 'object' &&
-    typeof (body as Record<string, unknown>)['nmapOutput'] === 'string' &&
-    (body as Record<string, string>)['nmapOutput']!.trim()
-  ) {
+  // Si viene nmapOutput o authLog, fusionar findings antes de invocar el análisis
+  if (body && typeof body === 'object') {
     const raw = body as Record<string, unknown>;
-    const { mergedFindings, mergedSourceContext } = mergeFindings({
-      findings: Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [],
-      nmapOutput: raw['nmapOutput'] as string,
-      sourceContext: typeof raw['sourceContext'] === 'string' ? raw['sourceContext'] : undefined,
-    });
-    // Reemplazar findings y sourceContext con la versión fusionada
-    raw['findings'] = mergedFindings;
-    if (mergedSourceContext !== undefined) {
-      raw['sourceContext'] = mergedSourceContext;
+    const hasNmap = typeof raw['nmapOutput'] === 'string' && (raw['nmapOutput'] as string).trim();
+    const hasAuth = typeof raw['authLog'] === 'string' && (raw['authLog'] as string).trim();
+
+    if (hasNmap || hasAuth) {
+      const { mergedFindings, mergedSourceContext } = mergeFindings({
+        findings: Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [],
+        nmapOutput: typeof raw['nmapOutput'] === 'string' ? raw['nmapOutput'] as string : undefined,
+        authLog: typeof raw['authLog'] === 'string' ? raw['authLog'] as string : undefined,
+        sourceContext: typeof raw['sourceContext'] === 'string' ? raw['sourceContext'] : undefined,
+      });
+      // Reemplazar findings y sourceContext con la versión fusionada
+      raw['findings'] = mergedFindings;
+      if (mergedSourceContext !== undefined) {
+        raw['sourceContext'] = mergedSourceContext;
+      }
+      // Eliminar campos de log para que el validator no los vea como campos extra
+      delete raw['nmapOutput'];
+      delete raw['authLog'];
     }
-    // Eliminar nmapOutput para que el validator no lo vea como campo extra
-    delete raw['nmapOutput'];
   }
 
   // Invocar orchestrator

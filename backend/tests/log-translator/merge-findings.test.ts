@@ -93,4 +93,54 @@ describe('mergeFindings — helper de fusión', () => {
 
     expect(result.mergedSourceContext!.length).toBeLessThanOrEqual(200);
   });
+
+  // ─── Tests de integración authLog ────────────────────────────────────────
+
+  it('should merge authLog findings when authLog is provided', () => {
+    const authLog = [
+      'Jan  5 03:12:01 server sshd[1]: Failed password for root from 1.1.1.1 port 22 ssh2',
+      'Jan  5 03:12:02 server sshd[2]: Failed password for root from 1.1.1.1 port 22 ssh2',
+    ].join('\n');
+
+    const result = mergeFindings({
+      findings: [sampleScannerFinding],
+      authLog,
+    });
+
+    // 1 directo + 1 de authLog (agrupado por IP)
+    expect(result.mergedFindings.length).toBeGreaterThan(1);
+    expect(result.mergedFindings[0]).toEqual(sampleScannerFinding);
+    const authFinding = result.mergedFindings.find((f) => f.category === 'log-analysis');
+    expect(authFinding).toBeDefined();
+    expect(authFinding!.rawValue).toContain('1.1.1.1');
+    expect(result.mergedSourceContext).toContain('auth.log');
+    expect(result.mergedSourceContext!.length).toBeLessThanOrEqual(200);
+  });
+
+  it('should not modify result when authLog is empty', () => {
+    const result = mergeFindings({
+      findings: [sampleScannerFinding],
+      authLog: '   ',
+      sourceContext: 'test context',
+    });
+
+    expect(result.mergedFindings).toEqual([sampleScannerFinding]);
+    expect(result.mergedSourceContext).toBe('test context');
+  });
+
+  it('should handle both nmapOutput and authLog together', () => {
+    const authLog = 'Jan  5 03:12:01 server sshd[1]: Failed password for root from 2.2.2.2 port 22 ssh2';
+
+    const result = mergeFindings({
+      findings: [sampleScannerFinding],
+      nmapOutput: sampleNmapOutput,
+      authLog,
+    });
+
+    // 1 directo + 3 nmap + 1 auth
+    expect(result.mergedFindings).toHaveLength(5);
+    expect(result.mergedSourceContext).toContain('Nmap');
+    expect(result.mergedSourceContext).toContain('auth.log');
+    expect(result.mergedSourceContext!.length).toBeLessThanOrEqual(200);
+  });
 });

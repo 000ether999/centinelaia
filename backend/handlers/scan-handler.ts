@@ -15,6 +15,9 @@ import { createTlsChecker } from '../services/scanner/modules/tls-checker.js';
 import { createCookieInspector } from '../services/scanner/modules/cookie-inspector.js';
 import { createDnsChecker } from '../services/scanner/modules/dns-checker.js';
 import { createFingerprinter } from '../services/scanner/modules/fingerprinter.js';
+import { createCorsChecker } from '../services/scanner/modules/cors-checker.js';
+import { createHttpMethodsChecker } from '../services/scanner/modules/http-methods-checker.js';
+import { createSecurityTxtChecker } from '../services/scanner/modules/security-txt-checker.js';
 import type { ScanResult, ConsentEvidence } from '../models/scan.js';
 import type { ScanModuleInput } from '../services/scanner/modules/types.js';
 
@@ -123,7 +126,7 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     timeoutMs: 5000,
   };
 
-  // Configurar orquestador con los 5 módulos registrados
+  // Configurar orquestador con los 8 módulos registrados
   const config: OrchestratorConfig = {
     moduleTimeoutMs: 5000,
     globalTimeoutMs: 25000,
@@ -133,6 +136,9 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       createCookieInspector(),
       createDnsChecker(),
       createFingerprinter(),
+      createCorsChecker(),
+      createHttpMethodsChecker(),
+      createSecurityTxtChecker(),
     ],
   };
 
