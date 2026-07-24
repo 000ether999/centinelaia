@@ -17,6 +17,48 @@ const SEVERITY_WEIGHTS: Record<FindingSeverity, number> = {
   info: 0,
 };
 
+// ─── Multiplicadores por categoría para evitar doble conteo e inflación ──────
+
+/**
+ * Multiplicador 0 para correlaciones: estos findings se crean al cruzar un CVE
+ * con un hallazgo de Nmap. Si contaran en el score base, el mismo problema se
+ * contaría dos veces (una por el CVE original y otra por la correlación).
+ */
+const MULTIPLIER_CORRELATION = 0;
+
+/**
+ * Multiplicador 0.5 para vulnerabilidades conocidas (CVE): provienen de una
+ * búsqueda aproximada por palabras clave en NVD, sin verificación de versión
+ * exacta. Contarlas a peso completo inflaría el score con falsos positivos.
+ */
+const MULTIPLIER_KNOWN_VULNERABILITIES = 0.5;
+
+/**
+ * Multiplicador 1.0 para todas las demás categorías: hallazgos verificados
+ * directamente por los módulos de escaneo propios.
+ */
+const MULTIPLIER_DEFAULT = 1.0;
+
+/** Retorna el multiplicador de score base según la categoría del finding */
+function getCategoryMultiplier(category: FindingCategory): number {
+  switch (category) {
+    case 'correlation':
+      return MULTIPLIER_CORRELATION;
+    case 'known-vulnerabilities':
+      return MULTIPLIER_KNOWN_VULNERABILITIES;
+    default:
+      return MULTIPLIER_DEFAULT;
+  }
+}
+
+/**
+ * Categorías excluidas del cálculo de diversidad porque no representan una
+ * fuente de riesgo independiente (correlation es derivada de otro hallazgo).
+ */
+const DIVERSITY_EXCLUDED_CATEGORIES: ReadonlySet<FindingCategory> = new Set([
+  'correlation',
+]);
+
 /** Umbral mínimo de severidad para que una categoría cuente en diversidad */
 const DIVERSITY_THRESHOLD_SEVERITIES: ReadonlySet<FindingSeverity> = new Set([
   'critical',
@@ -87,12 +129,14 @@ export function calculateRiskScore(findings: Finding[]): RiskScoreResult {
 }
 
 /**
- * Calcula el score base: MIN(suma(peso × cantidad por severidad), 100).
+ * Calcula el score base: MIN(suma(peso × multiplicador_categoría), 100).
+ * El multiplicador por categoría reduce o elimina el aporte de findings
+ * que no representan riesgo verificado de forma independiente.
  */
 function calculateBaseScore(findings: Finding[]): number {
   let sum = 0;
   for (const finding of findings) {
-    sum += SEVERITY_WEIGHTS[finding.severity];
+    sum += SEVERITY_WEIGHTS[finding.severity] * getCategoryMultiplier(finding.category);
   }
   return Math.min(sum, 100);
 }
@@ -100,6 +144,8 @@ function calculateBaseScore(findings: Finding[]): number {
 /**
  * Calcula el factor de diversidad: +10% por categoría distinta
  * que contenga al menos un finding de severidad medium o superior.
+ * Se excluyen categorías derivadas (correlation) que no representan
+ * una fuente de riesgo independiente.
  * Máximo incremento: 50% (5 categorías).
  */
 function calculateDiversityFactor(findings: Finding[]): number {
@@ -107,7 +153,8 @@ function calculateDiversityFactor(findings: Finding[]): number {
   const categoriesWithSignificantFindings = new Set<FindingCategory>();
 
   for (const finding of findings) {
-    if (DIVERSITY_THRESHOLD_SEVERITIES.has(finding.severity)) {
+    if (DIVERSITY_THRESHOLD_SEVERITIES.has(finding.severity)
+        && !DIVERSITY_EXCLUDED_CATEGORIES.has(finding.category)) {
       categoriesWithSignificantFindings.add(finding.category);
     }
   }

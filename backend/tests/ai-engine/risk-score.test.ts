@@ -133,3 +133,53 @@ describe('calculateRiskScore', () => {
     });
   });
 });
+
+describe('calculateRiskScore — corrección de doble conteo y sobre-peso CVE', () => {
+  it('sin doble conteo: correlation no aporta al score base', () => {
+    const findings = [
+      finding('known-vulnerabilities', 'critical'),
+      finding('correlation', 'critical'),
+    ];
+    const result = calculateRiskScore(findings);
+    // base = 25×0.5 + 25×0 = 12.5
+    // diversidad: correlation excluida, known-vulnerabilities cuenta → 1 categoría → 0.10
+    // final = round(12.5 × 1.10) = round(13.75) = 14
+    expect(result.riskScore).toBe(14);
+    // Debe ser estrictamente menor al cálculo antiguo (que daría 60)
+    expect(result.riskScore).toBeLessThan(60);
+  });
+
+  it('CVE con medio peso: un solo CVE crítico aproximado no fuerza grado F', () => {
+    const findings = [finding('known-vulnerabilities', 'critical')];
+    const result = calculateRiskScore(findings);
+    // base = 25×0.5 = 12.5, diversidad = 1 categoría → 0.10
+    // final = round(12.5 × 1.10) = round(13.75) = 14
+    expect(result.riskScore).toBe(14);
+    expect(result.grade).not.toBe('F');
+    expect(result.grade).toBe('A');
+  });
+
+  it('correlación no cuenta en diversidad: agregar correlation no cambia el score', () => {
+    const base = [
+      finding('http-headers', 'medium'),
+      finding('known-vulnerabilities', 'high'),
+    ];
+    const withCorrelation = [
+      ...base,
+      finding('correlation', 'medium'),
+    ];
+    // Correlation aporta 0 al base y no cuenta para diversidad
+    expect(calculateRiskScore(withCorrelation)).toEqual(calculateRiskScore(base));
+  });
+
+  it('determinismo con known-vulnerabilities y correlation: el orden no importa', () => {
+    const findings = [
+      finding('http-headers', 'high'),
+      finding('known-vulnerabilities', 'critical'),
+      finding('correlation', 'high'),
+      finding('tls-ssl', 'medium'),
+    ];
+    const shuffled = [findings[2]!, findings[0]!, findings[3]!, findings[1]!];
+    expect(calculateRiskScore(shuffled)).toEqual(calculateRiskScore(findings));
+  });
+});
