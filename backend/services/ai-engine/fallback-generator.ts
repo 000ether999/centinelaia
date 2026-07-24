@@ -16,6 +16,7 @@ const CATEGORY_DESCRIPTIONS: Record<FindingCategory, string> = {
   'dns-security': 'registros DNS de seguridad',
   'server-fingerprint': 'exposición de información del servidor',
   'log-analysis': 'eventos de seguridad en logs de autenticación',
+  'known-vulnerabilities': 'vulnerabilidades conocidas (CVE) en software detectado',
 };
 
 const CATEGORY_RECOMMENDATIONS: Record<FindingCategory, string> = {
@@ -25,6 +26,7 @@ const CATEGORY_RECOMMENDATIONS: Record<FindingCategory, string> = {
   'dns-security': 'Configurar los registros DNS de seguridad (SPF, DKIM, DMARC) en el proveedor de dominio.',
   'server-fingerprint': 'Ocultar la información de versión del servidor y frameworks en las respuestas HTTP.',
   'log-analysis': 'Endurecer el acceso SSH: deshabilitar login de root, usar autenticación por llaves en lugar de contraseñas, configurar fail2ban para bloqueo automático y limitar las IPs que pueden conectarse al servicio.',
+  'known-vulnerabilities': 'actualizar/parchear el software a una versión que corrija la vulnerabilidad; revisar el aviso del CVE',
 };
 
 const SEVERITY_URGENCY: Record<FindingSeverity, string> = {

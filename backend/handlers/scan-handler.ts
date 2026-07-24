@@ -20,6 +20,7 @@ import { createHttpMethodsChecker } from '../services/scanner/modules/http-metho
 import { createSecurityTxtChecker } from '../services/scanner/modules/security-txt-checker.js';
 import type { ScanResult, ConsentEvidence } from '../models/scan.js';
 import type { ScanModuleInput } from '../services/scanner/modules/types.js';
+import { enrichWithCves } from '../services/cve-enricher/index.js';
 
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
@@ -145,6 +146,17 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   // Ejecutar escaneo
   const orchestratorResult = await executeScan(moduleInput, config);
 
+  // Enriquecer con CVEs (fail-open: si falla, continuar con findings originales)
+  let enrichedFindings = orchestratorResult.findings;
+  try {
+    enrichedFindings = await enrichWithCves(orchestratorResult.findings);
+  } catch (error: unknown) {
+    console.warn(
+      '[scan-handler] CVE enrichment failed, proceeding without CVEs:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+
   // Construir evidencia de consentimiento
   const consent: ConsentEvidence = {
     authorizationConfirmed: true,
@@ -155,6 +167,7 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   // Construir resultado completo
   const fullResult: ScanResult = {
     ...orchestratorResult,
+    findings: enrichedFindings,
     sessionId,
     consent,
     persisted: true,

@@ -13,7 +13,8 @@ export type FindingCategory =
   | 'cookies'
   | 'dns-security'
   | 'server-fingerprint'
-  | 'log-analysis';
+  | 'log-analysis'
+  | 'known-vulnerabilities';
 
 /**
  * Niveles de severidad ordenados de mayor a menor impacto.
