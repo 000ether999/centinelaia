@@ -32,7 +32,7 @@ const SEVERITY_ORDER: Record<FindingSeverity, number> = {
 /** Patrón de servicios relacionados con TLS/SSL/HTTPS en la columna SERVICE de Nmap. */
 const HTTPS_SERVICE_PATTERN = /https|ssl|tls/i;
 
-/** Fila de servicio de Nmap reconstruida desde un Finding 'server-fingerprint'. */
+/** Fila de servicio de Nmap reconstruida desde un Finding 'port-service'. */
 interface DetectedNmapRow {
   port: number;
   service: string;
@@ -42,33 +42,24 @@ interface DetectedNmapRow {
 /**
  * Intenta reconstruir una fila de servicio de Nmap desde un Finding.
  * Los findings derivados de Nmap (ver `nmap-parser.ts`) tienen
- * category 'server-fingerprint' y rawValue como JSON con port/service/version.
- * Retorna null si el finding no proviene de Nmap (ej. headers del fingerprinter).
+ * category 'port-service' y serviceInfo con port/service/version.
+ * Retorna null si el finding no proviene de Nmap.
  */
 function tryParseNmapRow(finding: Finding): DetectedNmapRow | null {
-  if (finding.category !== 'server-fingerprint' || !finding.rawValue) return null;
-
-  try {
-    const parsed = JSON.parse(finding.rawValue) as Record<string, unknown>;
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      typeof parsed.port !== 'number' ||
-      typeof parsed.service !== 'string' ||
-      parsed.service.trim() === ''
-    ) {
+  // Camino principal: findings 'port-service' con serviceInfo estructurado
+  if (finding.category === 'port-service' && finding.serviceInfo) {
+    const { port, service, version } = finding.serviceInfo;
+    if (typeof port !== 'number' || typeof service !== 'string' || service.trim() === '') {
       return null;
     }
-
     return {
-      port: parsed.port,
-      service: parsed.service,
-      version: typeof parsed.version === 'string' ? parsed.version.trim() : '',
+      port,
+      service,
+      version: typeof version === 'string' ? version.trim() : '',
     };
-  } catch {
-    // rawValue no es JSON (ej. "server: nginx/1.18.0" del fingerprinter) → no es fila Nmap
-    return null;
   }
+
+  return null;
 }
 
 /** Trunca un texto a una longitud máxima, agregando "..." si fue recortado. */

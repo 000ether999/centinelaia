@@ -54,10 +54,10 @@ describe('mergeFindings — helper de fusión', () => {
     // Scanner finding first, then 3 nmap findings
     expect(result.mergedFindings).toHaveLength(4);
     expect(result.mergedFindings[0]).toEqual(sampleScannerFinding);
-    // Nmap findings should be server-fingerprint category
-    expect(result.mergedFindings[1]!.category).toBe('server-fingerprint');
-    expect(result.mergedFindings[2]!.category).toBe('server-fingerprint');
-    expect(result.mergedFindings[3]!.category).toBe('server-fingerprint');
+    // Nmap findings should be port-service category
+    expect(result.mergedFindings[1]!.category).toBe('port-service');
+    expect(result.mergedFindings[2]!.category).toBe('port-service');
+    expect(result.mergedFindings[3]!.category).toBe('port-service');
   });
 
   it('should build merged sourceContext indicating both sources', () => {

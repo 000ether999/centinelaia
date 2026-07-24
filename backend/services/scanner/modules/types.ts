@@ -13,6 +13,7 @@ export type FindingCategory =
   | 'cookies'
   | 'dns-security'
   | 'server-fingerprint'
+  | 'port-service'
   | 'cors'
   | 'http-methods'
   | 'security-txt'
@@ -34,6 +35,14 @@ export interface Finding {
   severity: FindingSeverity;
   rawValue: string | null;
   description: string; // 10-500 caracteres
+  /** Datos estructurados de un servicio detectado (findings 'port-service' de Nmap). */
+  serviceInfo?: {
+    port: number;
+    protocol: string;
+    state: string;
+    service: string;
+    version: string; // "" si no se detectó
+  };
 }
 
 /**

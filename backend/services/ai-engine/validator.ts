@@ -14,6 +14,7 @@ const VALID_CATEGORIES: ReadonlySet<string> = new Set<FindingCategory>([
   'cookies',
   'dns-security',
   'server-fingerprint',
+  'port-service',
   'cors',
   'http-methods',
   'security-txt',
@@ -173,12 +174,17 @@ export function validateAnalysisRequest(input: unknown): ValidationResult {
   // Sanitizar findings (remover caracteres de control)
   let sanitizedFindings: Finding[] = findings.map((f) => {
     const finding = f as Record<string, unknown>;
-    return {
+    const sanitized: Finding = {
       category: finding.category as FindingCategory,
       severity: finding.severity as FindingSeverity,
       rawValue: finding.rawValue !== null ? sanitizeText(finding.rawValue as string) : null,
       description: sanitizeText(finding.description as string),
     };
+    // Preservar serviceInfo si existe (campo estructurado para port-service)
+    if (finding.serviceInfo && typeof finding.serviceInfo === 'object') {
+      sanitized.serviceInfo = finding.serviceInfo as Finding['serviceInfo'];
+    }
+    return sanitized;
   });
 
   // Truncar a 50 findings si excede, priorizando por severidad descendente

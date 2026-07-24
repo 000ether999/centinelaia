@@ -43,11 +43,21 @@ export function convertNmapServiceRowToFinding(row: NmapServiceRow): Finding {
     `El puerto ${row.port}/${row.protocol} está en estado "${row.state}" y corresponde ` +
     `al servicio "${row.service}"${versionDetail}.`;
 
+  // rawValue legible (no JSON) para consumo humano
+  const rawValue = `${row.port}/${row.protocol} ${row.service} ${row.version}`.trim();
+
   return {
-    category: 'server-fingerprint',
+    category: 'port-service',
     severity: row.state === 'open' ? 'low' : 'info',
-    rawValue: JSON.stringify(row),
+    rawValue,
     description: description.length <= 500 ? description : `${description.slice(0, 497)}...`,
+    serviceInfo: {
+      port: row.port,
+      protocol: row.protocol,
+      state: row.state,
+      service: row.service,
+      version: row.version,
+    },
   };
 }
 
