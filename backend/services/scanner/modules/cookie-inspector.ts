@@ -11,6 +11,7 @@
 
 import type { Finding, ScanModule, ScanModuleInput } from './types.js';
 import { resolveAndCheckIp } from '../validator.js';
+import { getSafeAgent } from '../safe-agent.js';
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -50,7 +51,8 @@ export function createCookieInspector(): ScanModule {
         const response = await fetch(currentUrl, {
           redirect: 'manual',
           signal: AbortSignal.timeout(input.timeoutMs),
-        });
+          dispatcher: getSafeAgent() as any,
+        } as RequestInit);
 
         // Recolectar cookies de esta respuesta
         const setCookies = response.headers.getSetCookie();

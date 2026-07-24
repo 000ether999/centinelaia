@@ -9,6 +9,7 @@
  */
 
 import { resolveAndCheckIp } from '../validator.js';
+import { getSafeAgent } from '../safe-agent.js';
 import type { Finding, ScanModule, ScanModuleInput } from './types.js';
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -80,7 +81,8 @@ async function fetchWithSsrfProtection(
         method: 'GET',
         redirect: 'manual',
         signal: controller.signal,
-      });
+        dispatcher: getSafeAgent() as any,
+      } as RequestInit);
     } finally {
       clearTimeout(timeoutId);
     }

@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "demo:phase3": "node backend/dist/scripts/run-scan-analysis.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -20,6 +21,7 @@
     "@aws-sdk/client-bedrock-runtime": "3.750.0",
     "@aws-sdk/client-dynamodb": "3.750.0",
     "@aws-sdk/lib-dynamodb": "3.750.0",
+    "undici": "^8.8.0",
     "uuid": "11.1.0"
   }
 }

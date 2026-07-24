@@ -10,6 +10,8 @@
 
 import tls from 'node:tls';
 import type { TLSSocket, SecureVersion } from 'node:tls';
+import { resolve4, resolve6 } from 'node:dns/promises';
+import { isBlockedIp } from '../ip-guard.js';
 import type { Finding, ScanModule, ScanModuleInput } from './types.js';
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
@@ -47,6 +49,33 @@ const CERT_EXPIRY_WARNING_DAYS = 30;
  * Puerto TLS/HTTPS por defecto.
  */
 const DEFAULT_TLS_PORT = 443;
+
+// ─── Resolución DNS segura ───────────────────────────────────────────────────
+
+/**
+ * Resuelve el host via DNS y valida TODAS las IPs contra isBlockedIp.
+ * Retorna la primera IP válida y su familia. Lanza si alguna IP es bloqueada
+ * o si la resolución falla (prevención de DNS rebinding / TOCTOU).
+ */
+async function resolveAndValidateHost(host: string): Promise<{ ip: string; family: 4 | 6 }> {
+  const ipv4s = await resolve4(host).catch(() => [] as string[]);
+  const ipv6s = await resolve6(host).catch(() => [] as string[]);
+  const allIps = [...ipv4s, ...ipv6s];
+
+  if (allIps.length === 0) {
+    throw new Error(`DNS resolution failed for ${host}`);
+  }
+
+  for (const ip of allIps) {
+    if (isBlockedIp(ip)) {
+      throw new Error(`DNS rebinding blocked: ${host} resolved to blocked IP ${ip}`);
+    }
+  }
+
+  const ip = ipv4s.length > 0 ? ipv4s[0]! : ipv6s[0]!;
+  const family: 4 | 6 = ipv4s.length > 0 ? 4 : 6;
+  return { ip, family };
+}
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
@@ -132,22 +161,34 @@ async function checkProtocols(
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
 
+  // Resolver el host UNA VEZ y reutilizar la IP para todas las pruebas de protocolo
+  let resolvedIp: string;
+  try {
+    const resolved = await resolveAndValidateHost(host);
+    resolvedIp = resolved.ip;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    findings.push({
+      category: 'tls-ssl',
+      severity: 'critical',
+      rawValue: null,
+      description: `Cannot resolve host for TLS verification: ${message}`,
+    });
+    return findings;
+  }
+
   for (const { version, label } of TESTABLE_PROTOCOLS) {
-    const supported = await testProtocolVersion(host, port, version, timeoutMs);
+    const supported = await testProtocolVersion(resolvedIp, port, version, timeoutMs, host);
 
     if (supported === 'timeout') {
-      // Solo reportamos timeout si es la primera prueba que falla por timeout
-      // ya que puede ser que el servidor simplemente no responde
       findings.push({
         category: 'tls-ssl',
         severity: 'critical',
         rawValue: null,
         description: `TLS connection timed out while testing ${label} support (timeout: ${timeoutMs}ms)`,
       });
-      // Si hay timeout en la primera versión, no tiene sentido seguir intentando
       break;
     } else if (supported === true) {
-      // Protocolo soportado
       if (version === 'TLSv1' || version === 'TLSv1.1') {
         findings.push({
           category: 'tls-ssl',
@@ -164,7 +205,6 @@ async function checkProtocols(
         });
       }
     } else {
-      // Protocolo no soportado — informativo
       findings.push({
         category: 'tls-ssl',
         severity: 'info',
@@ -180,12 +220,18 @@ async function checkProtocols(
 /**
  * Prueba si el servidor soporta una versión de protocolo TLS específica.
  * Retorna true/false/'timeout'.
+ * @param ip - IP resuelta del host (conexión real)
+ * @param port - Puerto TLS
+ * @param version - Versión de protocolo a probar
+ * @param timeoutMs - Timeout en ms
+ * @param servername - Hostname original para SNI
  */
 function testProtocolVersion(
-  host: string,
+  ip: string,
   port: number,
   version: SecureVersion,
   timeoutMs: number,
+  servername: string,
 ): Promise<boolean | 'timeout'> {
   return new Promise((resolve) => {
     let settled = false;
@@ -200,12 +246,12 @@ function testProtocolVersion(
 
     const socket: TLSSocket = tls.connect(
       {
-        host,
+        host: ip,
         port,
         minVersion: version,
         maxVersion: version,
         rejectUnauthorized: false, // Queremos probar incluso con certs inválidos
-        servername: host,
+        servername,
       },
       () => {
         // Conexión exitosa → protocolo soportado
@@ -242,7 +288,23 @@ async function checkCipherAndCertificate(
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
 
-  const result = await connectAndInspect(host, port, timeoutMs);
+  // Resolver el host y validar IPs antes de conectar
+  let resolvedIp: string;
+  try {
+    const resolved = await resolveAndValidateHost(host);
+    resolvedIp = resolved.ip;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    findings.push({
+      category: 'tls-ssl',
+      severity: 'critical',
+      rawValue: null,
+      description: `Cannot resolve host for cipher/certificate verification: ${message}`,
+    });
+    return findings;
+  }
+
+  const result = await connectAndInspect(resolvedIp, port, timeoutMs, host);
 
   if (result === 'timeout') {
     findings.push({
@@ -287,11 +349,16 @@ interface TlsInspectionResult {
 
 /**
  * Conecta al servidor y extrae información de cipher y certificado.
+ * @param ip - IP resuelta (conexión real)
+ * @param port - Puerto TLS
+ * @param timeoutMs - Timeout en ms
+ * @param servername - Hostname original para SNI
  */
 function connectAndInspect(
-  host: string,
+  ip: string,
   port: number,
   timeoutMs: number,
+  servername: string,
 ): Promise<TlsInspectionResult | 'timeout' | 'error'> {
   return new Promise((resolve) => {
     let settled = false;
@@ -306,10 +373,10 @@ function connectAndInspect(
 
     const socket: TLSSocket = tls.connect(
       {
-        host,
+        host: ip,
         port,
         rejectUnauthorized: false, // Necesitamos inspeccionar certs inválidos también
-        servername: host,
+        servername,
       },
       () => {
         if (!settled) {

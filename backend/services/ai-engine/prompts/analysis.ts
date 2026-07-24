@@ -37,6 +37,7 @@ INSTRUCCIONES PARA CADA RECOMENDACIÓN:
 - Indica el nivel de esfuerzo: "quick-win" (rápido, minutos), "moderate" (horas), "complex" (días o requiere especialista).
 - Agrupa findings que se resuelven con la misma acción bajo una sola recomendación.
 - Indica los índices de los findings relacionados.
+- Cuando los hallazgos provienen de MÚLTIPLES fuentes (scanner + logs externos), RELACIONA explícitamente hallazgos entre fuentes que afectan la misma superficie de ataque (ej. puerto abierto en Nmap + debilidad TLS del scanner = misma exposición).
 
 FORMATO DE SALIDA (responde ÚNICAMENTE con este JSON, sin texto adicional):
 {

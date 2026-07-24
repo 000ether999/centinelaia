@@ -13,6 +13,7 @@ import {
   ValidationException,
   AccessDeniedException,
 } from '@aws-sdk/client-bedrock-runtime';
+import type { AiTextClient } from './types.js';
 
 /** Configuración del cliente de Bedrock */
 export interface BedrockClientConfig {
@@ -34,10 +35,26 @@ const TRANSIENT_ERROR_NAMES: ReadonlySet<string> = new Set([
   'ETIMEDOUT',
 ]);
 
-/**
- * Determina si un error es transitorio y merece reintento.
- */
+/** Detecta únicamente la variante de throttling causada por la cuota diaria de tokens. */
+function isDailyTokenQuotaError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const err = error as Record<string, unknown>;
+  if (err['name'] !== 'ThrottlingException') return false;
+  if (typeof err['message'] !== 'string') return false;
+
+  const normalizedMessage = err['message']
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  return normalizedMessage.includes('too many tokens per day')
+    && normalizedMessage.includes('please wait before trying again');
+}
+
+/** Determina si un error es transitorio y merece reintento. */
 function isTransientError(error: unknown): boolean {
+  if (isDailyTokenQuotaError(error)) return false;
   if (error instanceof ThrottlingException) return true;
   if (error instanceof ServiceUnavailableException) return true;
   if (error instanceof ValidationException) return false;
@@ -131,7 +148,7 @@ export function createBedrockClient(config?: Partial<BedrockClientConfig>) {
             messages: [
               {
                 role: 'user',
-                content: [{ type: 'text', text: prompt }],
+                content: [{ text: prompt }],
               },
             ],
             inferenceConfig: {
@@ -208,7 +225,7 @@ export function createBedrockClient(config?: Partial<BedrockClientConfig>) {
     throw new Error('Bedrock: reintentos agotados');
   }
 
-  return { invoke, config: resolvedConfig };
+  return { invoke, config: resolvedConfig } satisfies AiTextClient;
 }
 
 /**

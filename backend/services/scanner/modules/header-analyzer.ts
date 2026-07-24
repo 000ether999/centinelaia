@@ -9,6 +9,7 @@
  */
 
 import { resolveAndCheckIp } from '../validator.js';
+import { getSafeAgent } from '../safe-agent.js';
 import type { Finding, FindingCategory, FindingSeverity, ScanModule, ScanModuleInput } from './types.js';
 
 // ─── Configuración de severidad por header ───────────────────────────────────
@@ -85,7 +86,8 @@ async function fetchWithSsrfProtection(
       method: 'GET',
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
-    });
+      dispatcher: getSafeAgent() as any,
+    } as RequestInit);
 
     // Si no es una redirección 3xx, retornar la respuesta
     if (response.status < 300 || response.status >= 400) {
@@ -132,7 +134,8 @@ async function fetchWithSsrfProtection(
     method: 'GET',
     redirect: 'manual',
     signal: AbortSignal.timeout(timeoutMs),
-  });
+    dispatcher: getSafeAgent() as any,
+  } as RequestInit);
 
   return { response: finalResponse, ssrfFinding };
 }

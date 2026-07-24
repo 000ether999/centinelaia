@@ -5,6 +5,7 @@
  */
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { isAuthorized, unauthorizedResponse } from './auth.js';
 import { validateScanRequest } from '../services/scanner/validator.js';
 import { executeScan } from '../services/scanner/orchestrator.js';
 import type { OrchestratorConfig } from '../services/scanner/orchestrator.js';
@@ -64,6 +65,8 @@ function getPath(event: APIGatewayProxyEvent): string {
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
+    if (!isAuthorized(event)) return unauthorizedResponse();
+
     const method = getMethod(event);
     const path = getPath(event);
 

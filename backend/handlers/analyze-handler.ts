@@ -6,8 +6,10 @@
  */
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { isAuthorized, unauthorizedResponse } from './auth.js';
 import { analyzeFindings } from '../services/ai-engine/index.js';
 import { createPersistenceClient } from '../services/ai-engine/persistence-client.js';
+import { mergeFindings } from '../services/log-translator/merge-findings.js';
 
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
@@ -49,26 +51,50 @@ function getPath(event: APIGatewayProxyEvent): string {
 
 // ─── Handler principal ───────────────────────────────────────────────────────
 
+type AnalyzeExecutor = typeof analyzeFindings;
+type AnalysisPersistence = Pick<
+  ReturnType<typeof createPersistenceClient>,
+  'getById' | 'listBySession'
+>;
+
+export interface AnalyzeHandlerDependencies {
+  executeAnalysis?: AnalyzeExecutor;
+  persistence?: AnalysisPersistence;
+}
+
+/** Punto de entrada Lambda con las dependencias de producción. */
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  return handleAnalyzeRequest(event);
+}
+
+/** Permite ejecutar el mismo handler con dependencias locales en checkpoints y pruebas. */
+export async function handleAnalyzeRequest(
+  event: APIGatewayProxyEvent,
+  dependencies: AnalyzeHandlerDependencies = {}
+): Promise<APIGatewayProxyResult> {
   try {
+    if (!isAuthorized(event)) return unauthorizedResponse();
+
     const method = getMethod(event);
     const path = getPath(event);
+    const executeAnalysis = dependencies.executeAnalysis ?? analyzeFindings;
+    const persistenceClient = dependencies.persistence ?? persistence;
 
     // POST /analyze — ejecutar análisis
     if (method === 'POST' && /^\/analyze\/?$/.test(path)) {
-      return await handlePostAnalyze(event);
+      return await handlePostAnalyze(event, executeAnalysis);
     }
 
     // GET /analyze/{analysisId} — obtener un resultado por ID
     const analysisIdMatch = path.match(/^\/analyze\/([^/]+)\/?$/);
     if (method === 'GET' && analysisIdMatch) {
       const analysisId = event.pathParameters?.['analysisId'] ?? analysisIdMatch[1]!;
-      return await handleGetAnalysis(analysisId);
+      return await handleGetAnalysis(analysisId, persistenceClient);
     }
 
     // GET /analyze?sessionId=X — listar por sesión
     if (method === 'GET' && /^\/analyze\/?$/.test(path)) {
-      return await handleListAnalyses(event);
+      return await handleListAnalyses(event, persistenceClient);
     }
 
     return jsonResponse(404, { error: 'Not found' });
@@ -80,7 +106,10 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
 // ─── Handlers de ruta ────────────────────────────────────────────────────────
 
-async function handlePostAnalyze(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+async function handlePostAnalyze(
+  event: APIGatewayProxyEvent,
+  executeAnalysis: AnalyzeExecutor
+): Promise<APIGatewayProxyResult> {
   // Parsear body JSON
   let body: unknown;
   try {
@@ -89,8 +118,30 @@ async function handlePostAnalyze(event: APIGatewayProxyEvent): Promise<APIGatewa
     return jsonResponse(400, { error: 'Request body must be valid JSON' });
   }
 
+  // Si viene nmapOutput, fusionar findings antes de invocar el análisis
+  if (
+    body &&
+    typeof body === 'object' &&
+    typeof (body as Record<string, unknown>)['nmapOutput'] === 'string' &&
+    (body as Record<string, string>)['nmapOutput']!.trim()
+  ) {
+    const raw = body as Record<string, unknown>;
+    const { mergedFindings, mergedSourceContext } = mergeFindings({
+      findings: Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [],
+      nmapOutput: raw['nmapOutput'] as string,
+      sourceContext: typeof raw['sourceContext'] === 'string' ? raw['sourceContext'] : undefined,
+    });
+    // Reemplazar findings y sourceContext con la versión fusionada
+    raw['findings'] = mergedFindings;
+    if (mergedSourceContext !== undefined) {
+      raw['sourceContext'] = mergedSourceContext;
+    }
+    // Eliminar nmapOutput para que el validator no lo vea como campo extra
+    delete raw['nmapOutput'];
+  }
+
   // Invocar orchestrator
-  const result = await analyzeFindings(body);
+  const result = await executeAnalysis(body);
 
   // Verificar si el resultado es un error de validación
   if ('error' in result && !('analysisId' in result)) {
@@ -100,8 +151,11 @@ async function handlePostAnalyze(event: APIGatewayProxyEvent): Promise<APIGatewa
   return jsonResponse(200, result);
 }
 
-async function handleGetAnalysis(analysisId: string): Promise<APIGatewayProxyResult> {
-  const result = await persistence.getById(analysisId);
+async function handleGetAnalysis(
+  analysisId: string,
+  persistenceClient: AnalysisPersistence
+): Promise<APIGatewayProxyResult> {
+  const result = await persistenceClient.getById(analysisId);
 
   if (!result) {
     return jsonResponse(404, { error: 'Analysis not found' });
@@ -110,13 +164,16 @@ async function handleGetAnalysis(analysisId: string): Promise<APIGatewayProxyRes
   return jsonResponse(200, result);
 }
 
-async function handleListAnalyses(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+async function handleListAnalyses(
+  event: APIGatewayProxyEvent,
+  persistenceClient: AnalysisPersistence
+): Promise<APIGatewayProxyResult> {
   const sessionId = event.queryStringParameters?.['sessionId'];
 
   if (!sessionId) {
     return jsonResponse(400, { error: "Query parameter 'sessionId' is required" });
   }
 
-  const results = await persistence.listBySession(sessionId);
+  const results = await persistenceClient.listBySession(sessionId);
   return jsonResponse(200, results);
 }

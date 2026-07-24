@@ -29,13 +29,13 @@ Flujo secuencial y fail-closed para preparar, revisar y publicar CentinelaIA. Ca
   - Reportar rutas staged, resumen del diff y diff redactado; detenerse para solicitar aprobación explícita del commit.
   - _Requirements: 5.1, 5.2, 5.5_
 
-- [-] 5. Crear el commit aprobado con hooks habilitados
+- [x] 5. Crear el commit aprobado con hooks habilitados
   - Confirmar la aprobación del commit y que HEAD, índice y conjunto candidato no cambiaron; si cambiaron, invalidar la aprobación y volver a la tarea 2.
   - Crear un commit nuevo y descriptivo sin `--amend`, `--no-verify` ni opciones destructivas; bloquear ante fallo de hooks.
   - Reportar el SHA local y detenerse para solicitar una aprobación explícita e independiente del push.
   - _Requirements: 5.3, 5.5_
 
-- [ ] 6. Publicar al remoto aprobado y verificar el resultado
+- [x] 6. Publicar al remoto aprobado y verificar el resultado
   - Confirmar la aprobación del push y que nombre, URL y destino del remoto coincidan con el destino aprobado.
   - Actualizar referencias remotas sin alterar ramas de trabajo, comprobar fast-forward y ejecutar un push normal; usar `-u` solo para una rama nueva.
   - Ante divergencia o rechazo, conservar ambos historiales sin force, rebase automático ni reset; tras éxito, verificar el SHA remoto e informar URL pública y SHA.

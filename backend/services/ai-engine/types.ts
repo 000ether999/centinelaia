@@ -9,6 +9,12 @@ import type { Finding, FindingCategory, FindingSeverity } from '../scanner/modul
 // Re-exportar tipos del scanner para consumo externo del módulo
 export type { Finding, FindingCategory, FindingSeverity };
 
+/** Contrato común para clientes de generación de texto del AI Engine */
+export interface AiTextClient {
+  invoke(prompt: string, signal?: AbortSignal): Promise<string>;
+  config: { modelId: string };
+}
+
 // ─── Tipos de entrada ────────────────────────────────────────────────────────
 
 /** Solicitud de análisis al AI Engine */
@@ -60,6 +66,9 @@ export interface Recommendation {
 /** Niveles de esfuerzo para implementar una corrección */
 export type EffortLevel = 'quick-win' | 'moderate' | 'complex';
 
+/** Modos disponibles para ejecutar el enriquecimiento del análisis */
+export type AiExecutionMode = 'bedrock' | 'mock' | 'fallback';
+
 /** Metadatos del análisis */
 export interface AnalysisMetadata {
   timestamp: string;          // ISO 8601
@@ -67,10 +76,29 @@ export interface AnalysisMetadata {
   latencyMs: number;
   cached: boolean;
   status: AnalysisStatus;
+  executionMode: AiExecutionMode;
 }
 
 /** Estados posibles del resultado de análisis */
 export type AnalysisStatus = 'complete' | 'degraded' | 'partial';
+
+/**
+ * Completa metadata antigua sin modo usando el modelId persistido.
+ * Evita exponer resultados cacheados con procedencia ambigua.
+ */
+export function normalizeAnalysisResultExecutionMode(result: AnalysisResult): AnalysisResult {
+  const metadata = result.metadata as AnalysisMetadata & { executionMode?: AiExecutionMode };
+  if (metadata.executionMode) return result;
+
+  const normalizedModelId = metadata.modelId.toLowerCase();
+  const executionMode: AiExecutionMode = normalizedModelId.includes('mock')
+    ? 'mock'
+    : normalizedModelId === 'none'
+      ? 'fallback'
+      : 'bedrock';
+
+  return { ...result, metadata: { ...metadata, executionMode } };
+}
 
 // ─── Tipos de validación ─────────────────────────────────────────────────────
 

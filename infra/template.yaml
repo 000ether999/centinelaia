@@ -1,7 +1,21 @@
 # infra/template.yaml
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: CentinelaIA Scanner - Motor de escaneo de seguridad web
+Description: >-
+  CentinelaIA - Auditor de seguridad web: motor de escaneo (headers, TLS, cookies,
+  DNS, fingerprinting), motor de IA compartido (Amazon Bedrock/Nova Micro con
+  fallback por reglas), traductor de logs Nmap con correlación, y frontend estático
+  servido por CloudFront.
+
+Parameters:
+  ApiSharedSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      Secreto compartido para autenticar las peticiones (header x-api-key).
+      Se pasa en el despliegue: sam deploy --parameter-overrides ApiSharedSecret=<valor>.
+      Nunca se versiona en el repositorio. Si queda vacío, la autenticación se deshabilita.
 
 Globals:
   Function:
@@ -11,6 +25,7 @@ Globals:
     Environment:
       Variables:
         SCANS_TABLE: !Ref ScansTable
+        API_SHARED_SECRET: !Ref ApiSharedSecret
 
 Resources:
   ScanFunction:
@@ -45,8 +60,24 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - Content-Type
+          # Necesario para la autenticación por secreto compartido (Ola 4):
+          # sin esto el navegador bloquea el preflight de cualquier POST con la API key.
+          - x-api-key
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
       RouteSettings:
         "POST /scan":
+          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: 5
+        # /analyze puede invocar Bedrock (costo): se acota igual que /scan.
+        "POST /analyze":
           ThrottlingBurstLimit: 10
           ThrottlingRateLimit: 5
 
@@ -75,6 +106,19 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  TranslateLogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend/dist/handlers/translate-log-handler.handler
+      CodeUri: ../
+      Events:
+        PostTranslateLog:
+          Type: HttpApi
+          Properties:
+            Path: /translate-log
+            Method: POST
+            ApiId: !Ref ScanHttpApi
+
   # ─── AI Engine Resources ──────────────────────────────────────────────────────
 
   AnalyzeFunction:
@@ -93,6 +137,7 @@ Resources:
           BEDROCK_TEMPERATURE: "0.3"
           CACHE_TTL_MINUTES: "60"
           ORCHESTRATOR_TIMEOUT_MS: "25000"
+          AI_ENGINE_MODE: "fallback"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AnalysesTable
@@ -102,7 +147,9 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
-              Resource: "arn:aws:bedrock:*::foundation-model/*"
+              # Acotado al modelo Nova Micro en us-east-1 (menor privilegio).
+              # IMPORTANTE: si se cambia la env var BEDROCK_MODEL_ID, actualizar este ARN.
+              Resource: "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0"
       Events:
         PostAnalyze:
           Type: HttpApi
@@ -166,6 +213,92 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
+  # ─── Frontend estático privado con entrega por CloudFront ────────────────────
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: Acceso privado de CloudFront al bucket del frontend
+        Name: !Sub "${AWS::StackName}-frontend-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Distribución del frontend estático de CentinelaIA
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          ForwardedValues:
+            Cookies:
+              Forward: none
+            QueryString: false
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        Origins:
+          - DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            Id: FrontendS3Origin
+            OriginAccessControlId: !Ref FrontendOriginAccessControl
+            S3OriginConfig: {}
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt FrontendBucket.Arn
+              - !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
 Outputs:
   ScanApiUrl:
     Description: URL del API de escaneo
@@ -173,3 +306,12 @@ Outputs:
   AnalyzeApiUrl:
     Description: URL del API de análisis IA
     Value: !Sub "https://${ScanHttpApi}.execute-api.${AWS::Region}.amazonaws.com/analyze"
+  FrontendBucketName:
+    Description: Bucket privado que almacena los archivos del frontend
+    Value: !Ref FrontendBucket
+  FrontendDistributionId:
+    Description: ID de la distribución CloudFront del frontend
+    Value: !Ref FrontendDistribution
+  FrontendUrl:
+    Description: URL HTTPS pública del frontend
+    Value: !Sub "https://${FrontendDistribution.DomainName}"

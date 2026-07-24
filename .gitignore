@@ -34,6 +34,9 @@ sam-env.json
 env.json
 samconfig.local.toml
 
+# Configuración local del frontend (contiene URL/secreto del despliegue)
+frontend/config.js
+
 # Pruebas, cobertura, logs y temporales
 coverage/
 *.log
