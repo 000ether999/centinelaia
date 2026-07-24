@@ -1,25 +1,43 @@
 # CentinelaIA
 
-CentinelaIA es un auditor de seguridad web serverless que inspecciona encabezados HTTP, TLS, cookies, DNS y tecnologías expuestas. Sus hallazgos se guardan en DynamoDB y un motor compartido de IA los convierte en explicaciones claras, un score de riesgo y recomendaciones priorizadas. El mismo motor de IA también interpreta logs de Nmap subidos por el usuario y los correlaciona con los hallazgos del escáner. Úsalo únicamente sobre activos propios, laboratorios o sistemas para los que tengas autorización explícita.
+CentinelaIA es un auditor de seguridad web serverless que inspecciona encabezados HTTP, TLS, cookies, DNS, CORS, métodos HTTP permitidos, security.txt y tecnologías expuestas. Sus hallazgos se guardan en DynamoDB y un motor compartido de IA los convierte en explicaciones claras, un score de riesgo con grado compuesto (A–F) y recomendaciones priorizadas. El mismo motor de IA también interpreta logs externos (Nmap y auth.log/fail2ban) subidos por el usuario, los enriquece con CVEs conocidos (NVD) y los correlaciona con los hallazgos del escáner. Úsalo únicamente sobre activos propios, laboratorios o sistemas para los que tengas autorización explícita.
 
 ## Qué hace
 
-- **Escáner de seguridad web:** headers HTTP de seguridad, configuración TLS/SSL, cookies, registros DNS (SPF/DKIM/DMARC) y fingerprinting de tecnología del servidor.
-- **Motor de IA compartido:** traduce los hallazgos técnicos a explicaciones en lenguaje simple, calcula un score de riesgo compuesto (0-100) y prioriza qué corregir primero.
-- **Traductor de logs Nmap:** parsea una salida de Nmap y la analiza con el mismo motor de IA.
-- **Correlación:** combina hallazgos del escáner con los del log de Nmap en un solo análisis, relacionando la misma superficie de ataque entre fuentes.
+- **Escáner de seguridad web (8 checks):** headers HTTP de seguridad, configuración TLS/SSL, cookies, registros DNS (SPF/DKIM/DMARC), fingerprinting de tecnología del servidor, verificación de CORS, métodos HTTP permitidos y presencia de security.txt.
+- **Motor de IA compartido:** traduce los hallazgos técnicos a explicaciones en lenguaje simple, calcula un score de riesgo compuesto (0-100) con grado tipo SSL Labs (A–F) y prioriza qué corregir primero.
+- **Traductor de logs:** parsea salidas de Nmap y logs de autenticación (auth.log/fail2ban) y los analiza con el mismo motor de IA.
+- **Enriquecimiento CVE (NVD):** cruza versiones de software detectadas (tanto por el escáner como por logs de Nmap) con la base pública de vulnerabilidades conocidas del NVD, añadiendo findings de categoría `known-vulnerabilities`.
+- **Correlación determinista:** combina hallazgos del escáner con los del log y los CVEs en un solo análisis, relacionando la misma superficie de ataque entre fuentes (categoría `correlation`). Funciona sin Bedrock — es por reglas puras.
+- **Grado A–F:** además del score numérico, el motor devuelve una letra fácil de leer (A = mínimo riesgo, F = crítico), visible de forma prominente en el frontend.
 - **Historial por sesión:** los escaneos y análisis se persisten en DynamoDB, identificados por un `sessionId` simple.
 - **Frontend estático:** interfaz web ligera servida por CloudFront, con confirmación de autorización obligatoria antes de escanear.
 
+## Categorías de hallazgos
+
+| Categoría | Fuente |
+|---|---|
+| `http-headers` | Escáner |
+| `tls-ssl` | Escáner |
+| `cookies` | Escáner |
+| `dns-security` | Escáner |
+| `server-fingerprint` | Escáner |
+| `cors` | Escáner |
+| `http-methods` | Escáner |
+| `security-txt` | Escáner |
+| `log-analysis` | Traductor de logs (Nmap / auth.log) |
+| `known-vulnerabilities` | Enriquecimiento CVE (NVD) |
+| `correlation` | Motor de correlación determinista |
+
 ## Arquitectura
 
-El backend está escrito en TypeScript y se ejecuta en AWS Lambda detrás de una API Gateway HTTP API. AWS SAM define las funciones, las tablas DynamoDB bajo demanda, los permisos mínimos para invocar Bedrock y el frontend (S3 privado + CloudFront con Origin Access Control).
+El backend está escrito en TypeScript y se ejecuta en AWS Lambda detrás de una API Gateway HTTP API. AWS SAM define las funciones, las tablas DynamoDB bajo demanda, los permisos mínimos para invocar Bedrock (parametrizados por región y partición del stack) y el frontend (S3 privado + CloudFront con Origin Access Control).
 
 ### Motor de IA: tres modos de ejecución
 
 El motor de IA selecciona su proveedor con la variable de entorno `AI_ENGINE_MODE`:
 
-- `bedrock` — invoca Amazon Bedrock con el modelo **Nova Micro** (menor costo). Requiere acceso al modelo y cuota disponible en la región.
+- `bedrock` — invoca Amazon Bedrock con el modelo **Nova Micro** (menor costo). Requiere acceso al modelo y cuota disponible en la región del stack.
 - `mock` — cliente simulado que devuelve el mismo esquema de respuesta que el modelo real, sin costo ni cuota. Útil para demos y pruebas de contrato.
 - `fallback` — genera explicaciones y recomendaciones por reglas, sin invocar ningún modelo. Es el modo por defecto del despliegue: garantiza que el sistema nunca falle por cuota de Bedrock.
 
@@ -32,10 +50,10 @@ Todos los endpoints comparten la misma HTTP API:
 - `POST /scan` — ejecuta un escaneo (requiere `authorizationConfirmed: true`).
 - `GET /scan/{scanId}` — obtiene un escaneo por ID.
 - `GET /scan?sessionId=...` — lista escaneos de una sesión.
-- `POST /analyze` — analiza findings con el motor de IA. Acepta un campo opcional `nmapOutput` para traducir y **correlacionar** logs de Nmap con los findings enviados.
+- `POST /analyze` — analiza findings con el motor de IA. Acepta campos opcionales `nmapOutput` (salida de Nmap) y `authLog` (auth.log/fail2ban) para traducir, enriquecer con CVEs y **correlacionar** logs con los findings enviados.
 - `GET /analyze/{analysisId}` — obtiene un análisis por ID.
 - `GET /analyze?sessionId=...` — lista análisis de una sesión.
-- `POST /translate-log` — traduce una salida de Nmap a findings estructurados (parseo puro, sin IA). Endpoint auxiliar: el frontend usa `POST /analyze` con `nmapOutput` para el flujo completo.
+- `POST /translate-log` — traduce logs a findings estructurados sin invocar IA. Acepta `nmapOutput` (salida de Nmap) y/o `authLog` (auth.log/fail2ban); requiere al menos uno de los dos campos.
 
 ### Autenticación
 

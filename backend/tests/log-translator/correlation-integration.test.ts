@@ -11,6 +11,15 @@ import { handleAnalyzeRequest } from '../../handlers/analyze-handler.js';
 import type { AnalysisResult } from '../../services/ai-engine/types.js';
 import { analyzeFindings } from '../../services/ai-engine/index.js';
 
+/**
+ * Mock de fetch global: evita llamadas reales al NVD durante estos tests
+ * (el analyze-handler ahora invoca enrichWithCves internamente). Responder
+ * 404 mantiene el escenario determinista: sin CVEs, solo se agregan los
+ * findings de correlación por puerto/servicio.
+ */
+const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+vi.stubGlobal('fetch', mockFetch);
+
 /** Executor con dependencias mockeadas (cache y persistence in-memory). */
 async function fallbackAnalyze(request: unknown) {
   return analyzeFindings(request, {
@@ -56,6 +65,8 @@ function buildEvent(body: unknown): APIGatewayProxyEvent {
 describe('POST /analyze with nmapOutput — correlation integration', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ ok: false, status: 404 });
   });
 
   it('should merge nmap findings with body findings and return analysis covering both sources', async () => {
@@ -87,15 +98,49 @@ PORT    STATE SERVICE VERSION
 
     const result: AnalysisResult = JSON.parse(response.body);
 
-    // Debe cubrir findings de ambas fuentes: 1 del scanner + 2 de nmap = 3 total
-    expect(result.explanations.length).toBe(3);
+    // Debe cubrir findings de las fuentes fusionadas: 1 del scanner + 2 de nmap
+    // + 1 de correlación determinista (puerto 443/https ↔ debilidad TLS) = 4 total
+    expect(result.explanations.length).toBe(4);
     // El primero corresponde al finding de TLS (del scanner)
     expect(result.explanations[0]!.findingIndex).toBe(0);
     // Los de Nmap están en posiciones 1 y 2
     expect(result.explanations[1]!.findingIndex).toBe(1);
     expect(result.explanations[2]!.findingIndex).toBe(2);
+    // El finding de correlación va al final
+    expect(result.explanations[3]!.findingIndex).toBe(3);
     // Debe tener riskScore > 0 porque hay findings de severidad high
     expect(result.riskScore).toBeGreaterThan(0);
+  });
+
+  it('should emit a correlation finding linking the Nmap https service (port 443) with the scanner TLS finding', async () => {
+    const scannerFinding = {
+      category: 'tls-ssl',
+      severity: 'high',
+      description: 'El servidor acepta TLS 1.0 que es un protocolo obsoleto e inseguro.',
+      rawValue: 'TLSv1.0',
+    };
+
+    const nmapOutput = `
+PORT    STATE SERVICE VERSION
+443/tcp open  https   nginx 1.18.0
+`;
+
+    const event = buildEvent({
+      findings: [scannerFinding],
+      sessionId: 'test-session-correlation-rule',
+      nmapOutput,
+    });
+
+    const response = await handleAnalyzeRequest(event, {
+      executeAnalysis: fallbackAnalyze,
+      persistence: mockPersistence,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const result: AnalysisResult = JSON.parse(response.body);
+
+    // 1 scanner + 1 nmap + 1 correlación = 3
+    expect(result.explanations.length).toBe(3);
   });
 
   it('should work with nmapOutput only (no scanner findings in body)', async () => {

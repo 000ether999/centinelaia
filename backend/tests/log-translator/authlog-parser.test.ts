@@ -120,4 +120,31 @@ describe('translateAuthLog — parser de auth.log/fail2ban', () => {
       expect(f.rawValue).toBeTruthy();
     }
   });
+
+  it('deduplica "Invalid user" + "Failed password" del mismo evento (misma IP y PID)', () => {
+    // sshd emite DOS líneas para el mismo evento: "Invalid user" y "Failed password for invalid user"
+    // Con el mismo PID deben contar como 1 intento, no 2.
+    const log = [
+      'Jan  5 03:12:01 server sshd[1234]: Invalid user test from 10.0.0.9',
+      'Jan  5 03:12:01 server sshd[1234]: Failed password for invalid user test from 10.0.0.9 port 22 ssh2',
+    ].join('\n');
+
+    const findings = translateAuthLog(log);
+    const bruteFindings = findings.filter((f) => f.severity !== 'info');
+    expect(bruteFindings).toHaveLength(1);
+    expect(bruteFindings[0]!.rawValue).toContain('failed_attempts=1');
+  });
+
+  it('no colapsa intentos rápidos con mismo timestamp pero PIDs distintos (regresión)', () => {
+    // 150 intentos en el mismo segundo desde PIDs distintos = ataque de fuerza bruta rápido.
+    // Deben contarse como 150 intentos → severidad 'high'.
+    const lines = Array.from({ length: 150 }, (_, i) =>
+      `Jan  5 03:12:00 server sshd[${i}]: Failed password for root from 1.2.3.4 port 22 ssh2`
+    ).join('\n');
+
+    const findings = translateAuthLog(lines);
+    const brute = findings.find((f) => f.rawValue?.includes('1.2.3.4'));
+    expect(brute!.rawValue).toContain('failed_attempts=150');
+    expect(brute!.severity).toBe('high');
+  });
 });

@@ -154,7 +154,7 @@ export async function analyzeFindings(
     }
 
     const prioritizedRecommendations = prioritizeRecommendations(recommendations, findings);
-    const { riskScore, riskLevel } = calculateRiskScore(findings);
+    const { riskScore, riskLevel, grade } = calculateRiskScore(findings);
     const metadata: AnalysisMetadata = {
       timestamp: new Date().toISOString(),
       modelId,
@@ -168,6 +168,7 @@ export async function analyzeFindings(
       analysisId: '',
       riskScore,
       riskLevel,
+      grade,
       explanations,
       recommendations: prioritizedRecommendations,
       metadata,
@@ -204,6 +205,7 @@ function buildEmptyResult(startTime: number, executionMode: AiExecutionMode): An
     analysisId: '',
     riskScore: 0,
     riskLevel: 'minimal',
+    grade: 'A',
     explanations: [],
     recommendations: [],
     metadata: {

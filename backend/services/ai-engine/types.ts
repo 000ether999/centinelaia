@@ -31,6 +31,7 @@ export interface AnalysisResult {
   analysisId: string;           // UUID v4
   riskScore: number;            // 0-100, entero
   riskLevel: RiskLevel;
+  grade: RiskGrade;             // Grado compuesto A–F
   explanations: Explanation[];
   recommendations: Recommendation[];
   metadata: AnalysisMetadata;
@@ -46,6 +47,9 @@ export interface AnalysisResult {
 
 /** Niveles de riesgo derivados del score */
 export type RiskLevel = 'critical' | 'high' | 'moderate' | 'low' | 'minimal';
+
+/** Grado compuesto tipo SSL Labs (A = mínimo riesgo, F = crítico) */
+export type RiskGrade = 'A' | 'B' | 'C' | 'D' | 'F';
 
 /** Explicación en lenguaje natural de un hallazgo */
 export interface Explanation {

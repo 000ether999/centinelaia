@@ -6,7 +6,7 @@
  */
 
 import type { Finding, FindingSeverity, FindingCategory } from '../scanner/modules/types.js';
-import type { RiskLevel } from './types.js';
+import type { RiskGrade, RiskLevel } from './types.js';
 
 /** Pesos de severidad para el cálculo del score base */
 const SEVERITY_WEIGHTS: Record<FindingSeverity, number> = {
@@ -39,10 +39,20 @@ const RISK_LEVEL_THRESHOLDS: Array<{ min: number; max: number; level: RiskLevel 
   { min: 0, max: 20, level: 'minimal' },
 ];
 
+/** Mapeo de riskScore a grado tipo SSL Labs (inverso de las bandas de nivel) */
+const GRADE_THRESHOLDS: Array<{ min: number; max: number; grade: RiskGrade }> = [
+  { min: 81, max: 100, grade: 'F' },
+  { min: 61, max: 80, grade: 'D' },
+  { min: 41, max: 60, grade: 'C' },
+  { min: 21, max: 40, grade: 'B' },
+  { min: 0, max: 20, grade: 'A' },
+];
+
 /** Resultado del cálculo de Risk Score */
 export interface RiskScoreResult {
   riskScore: number;
   riskLevel: RiskLevel;
+  grade: RiskGrade;
 }
 
 /**
@@ -52,7 +62,7 @@ export interface RiskScoreResult {
 export function calculateRiskScore(findings: Finding[]): RiskScoreResult {
   // Caso base: sin findings
   if (findings.length === 0) {
-    return { riskScore: 0, riskLevel: 'minimal' };
+    return { riskScore: 0, riskLevel: 'minimal', grade: 'A' };
   }
 
   // Paso 1: Calcular score base (suma de pesos por severidad, tope 100)
@@ -70,7 +80,10 @@ export function calculateRiskScore(findings: Finding[]): RiskScoreResult {
   // Paso 4: Determinar nivel de riesgo
   const riskLevel = determineRiskLevel(finalScore);
 
-  return { riskScore: finalScore, riskLevel };
+  // Paso 5: Determinar grado compuesto (A–F)
+  const grade = determineGrade(finalScore);
+
+  return { riskScore: finalScore, riskLevel, grade };
 }
 
 /**
@@ -116,4 +129,18 @@ function determineRiskLevel(score: number): RiskLevel {
   }
   // Fallback defensivo (no debería alcanzarse con input válido)
   return 'minimal';
+}
+
+/**
+ * Determina el grado compuesto (A–F) basado en el riskScore.
+ * Mapeo inverso de las bandas: menor riesgo = mejor grado.
+ */
+function determineGrade(score: number): RiskGrade {
+  for (const { min, max, grade } of GRADE_THRESHOLDS) {
+    if (score >= min && score <= max) {
+      return grade;
+    }
+  }
+  // Fallback defensivo
+  return 'A';
 }

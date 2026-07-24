@@ -10,23 +10,31 @@ import type { Explanation, Recommendation, EffortLevel } from './types.js';
 // ─── Mapas de texto genérico por categoría ───────────────────────────────────
 
 const CATEGORY_DESCRIPTIONS: Record<FindingCategory, string> = {
-  'http-headers': 'cabeceras HTTP de seguridad',
+  'http-headers': 'configuración de cabeceras de seguridad HTTP',
   'tls-ssl': 'configuración de cifrado TLS/SSL',
   'cookies': 'configuración de cookies',
   'dns-security': 'registros DNS de seguridad',
   'server-fingerprint': 'exposición de información del servidor',
+  'cors': 'configuración CORS (Cross-Origin Resource Sharing)',
+  'http-methods': 'métodos HTTP habilitados',
+  'security-txt': 'publicación de security.txt (RFC 9116)',
   'log-analysis': 'eventos de seguridad en logs de autenticación',
   'known-vulnerabilities': 'vulnerabilidades conocidas (CVE) en software detectado',
+  'correlation': 'coincidencias detectadas entre distintas fuentes de información (scanner y logs)',
 };
 
 const CATEGORY_RECOMMENDATIONS: Record<FindingCategory, string> = {
-  'http-headers': 'Configurar las cabeceras HTTP de seguridad faltantes en el servidor web o mediante un middleware de la aplicación.',
+  'http-headers': 'Revisar y corregir las cabeceras de seguridad HTTP ausentes o mal configuradas (Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, etc.).',
   'tls-ssl': 'Actualizar la configuración TLS del servidor para usar protocolos y cifrados modernos, y renovar certificados si es necesario.',
   'cookies': 'Agregar los atributos de seguridad (Secure, HttpOnly, SameSite) a las cookies del sitio.',
   'dns-security': 'Configurar los registros DNS de seguridad (SPF, DKIM, DMARC) en el proveedor de dominio.',
   'server-fingerprint': 'Ocultar la información de versión del servidor y frameworks en las respuestas HTTP.',
+  'cors': 'Restringir Access-Control-Allow-Origin a orígenes confiables específicos y no combinar wildcard (*) con credenciales.',
+  'http-methods': 'Deshabilitar métodos HTTP peligrosos (TRACE, PUT, DELETE, CONNECT) en el servidor si no son necesarios para la aplicación.',
+  'security-txt': 'Publicar un archivo /.well-known/security.txt con información de contacto de seguridad según RFC 9116.',
   'log-analysis': 'Endurecer el acceso SSH: deshabilitar login de root, usar autenticación por llaves en lugar de contraseñas, configurar fail2ban para bloqueo automático y limitar las IPs que pueden conectarse al servicio.',
   'known-vulnerabilities': 'actualizar/parchear el software a una versión que corrija la vulnerabilidad; revisar el aviso del CVE',
+  'correlation': 'Revisar en conjunto los hallazgos relacionados entre fuentes: suelen indicar el mismo servicio o vulnerabilidad vista desde ángulos distintos, por lo que priorizar su corrección reduce el riesgo en múltiples frentes a la vez.',
 };
 
 const SEVERITY_URGENCY: Record<FindingSeverity, string> = {

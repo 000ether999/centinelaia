@@ -1,6 +1,15 @@
 import { API_BASE_URL, API_KEY } from './config.js';
 import { getExecutionModeText, getScoreClass, sortRecommendations } from './helpers.js';
 
+/** Fallback local para calcular el grado si la API no lo incluye (compatibilidad con caché antigua). */
+function getGradeFromScore(score) {
+  if (score >= 81) return 'F';
+  if (score >= 61) return 'D';
+  if (score >= 41) return 'C';
+  if (score >= 21) return 'B';
+  return 'A';
+}
+
 const elements = {
   sessionId: document.querySelector('#sessionId'),
   demoNotice: document.querySelector('#demoNotice'),
@@ -22,6 +31,7 @@ const elements = {
   executionMode: document.querySelector('#executionMode'),
   scoreGauge: document.querySelector('#scoreGauge'),
   riskScore: document.querySelector('#riskScore'),
+  riskGrade: document.querySelector('#riskGrade'),
   riskLevel: document.querySelector('#riskLevel'),
   findingsList: document.querySelector('#findingsList'),
   recommendationsList: document.querySelector('#recommendationsList'),
@@ -101,6 +111,7 @@ function renderAnalysis(findings, analysis) {
   const scoreClass = getScoreClass(score);
   elements.resultsPanel.hidden = false;
   elements.riskScore.textContent = String(score);
+  elements.riskGrade.textContent = analysis.grade ?? getGradeFromScore(score);
   elements.riskLevel.textContent = analysis.riskLevel ?? scoreClass;
   elements.executionMode.textContent = getExecutionModeText(analysis.metadata?.executionMode);
   elements.scoreGauge.className = `score-gauge ${scoreClass}`;

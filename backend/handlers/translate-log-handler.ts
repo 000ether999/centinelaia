@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { isAuthorized, unauthorizedResponse } from './auth.js';
 import { translateNmapOutput } from '../services/log-translator/nmap-parser.js';
+import { translateAuthLog } from '../services/log-translator/authlog-parser.js';
 
 const RESPONSE_HEADERS = {
   'Content-Type': 'application/json',
@@ -11,7 +12,7 @@ function jsonResponse(statusCode: number, body: unknown): APIGatewayProxyResult 
   return { statusCode, headers: RESPONSE_HEADERS, body: JSON.stringify(body) };
 }
 
-/** Handler liviano para traducir texto de Nmap sin invocar el AI Engine. */
+/** Handler liviano para traducir texto de Nmap o auth.log sin invocar el AI Engine. */
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   if (!isAuthorized(event)) return unauthorizedResponse();
 
@@ -23,18 +24,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return jsonResponse(400, { error: 'El body debe ser un objeto JSON válido.' });
   }
 
-  if (
-    typeof body !== 'object' ||
-    body === null ||
-    typeof (body as Record<string, unknown>)['nmapOutput'] !== 'string' ||
-    !(body as Record<string, string>)['nmapOutput']!.trim()
-  ) {
-    return jsonResponse(400, { error: "El campo 'nmapOutput' es obligatorio y no puede estar vacío." });
+  if (typeof body !== 'object' || body === null) {
+    return jsonResponse(400, { error: 'El body debe ser un objeto JSON válido.' });
   }
 
-  const findings = translateNmapOutput((body as Record<string, string>)['nmapOutput']!);
+  const raw = body as Record<string, unknown>;
+  const hasNmap = typeof raw['nmapOutput'] === 'string' && (raw['nmapOutput'] as string).trim();
+  const hasAuth = typeof raw['authLog'] === 'string' && (raw['authLog'] as string).trim();
+
+  if (!hasNmap && !hasAuth) {
+    return jsonResponse(400, { error: "Se requiere al menos uno de los campos 'nmapOutput' o 'authLog'." });
+  }
+
+  const findings = [
+    ...(hasNmap ? translateNmapOutput(raw['nmapOutput'] as string) : []),
+    ...(hasAuth ? translateAuthLog(raw['authLog'] as string) : []),
+  ];
+
   if (findings.length === 0) {
-    return jsonResponse(400, { error: 'La salida de Nmap no contiene filas de servicio parseables.' });
+    return jsonResponse(400, { error: 'El contenido enviado no contiene datos parseables.' });
   }
 
   return jsonResponse(200, { findings });

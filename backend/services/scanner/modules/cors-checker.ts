@@ -19,7 +19,7 @@ const TEST_ORIGIN = 'https://evil.example.com';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function finding(severity: FindingSeverity, rawValue: string | null, description: string): Finding {
-  return { category: 'http-headers', severity, rawValue, description };
+  return { category: 'cors', severity, rawValue, description };
 }
 
 function errorMsg(err: unknown): string {
@@ -35,7 +35,7 @@ function errorMsg(err: unknown): string {
 export function createCorsChecker(): ScanModule {
   return {
     name: 'cors-checker',
-    category: 'http-headers',
+    category: 'cors',
 
     async run(input: ScanModuleInput): Promise<Finding[]> {
       try {

@@ -23,8 +23,8 @@ function finding(category: FindingCategory, severity: FindingSeverity): Finding 
 }
 
 describe('calculateRiskScore', () => {
-  it('retorna 0 / minimal para un arreglo vacío', () => {
-    expect(calculateRiskScore([])).toEqual({ riskScore: 0, riskLevel: 'minimal' });
+  it('retorna 0 / minimal / grade A para un arreglo vacío', () => {
+    expect(calculateRiskScore([])).toEqual({ riskScore: 0, riskLevel: 'minimal', grade: 'A' });
   });
 
   it('aplica +10% de diversidad incluso con una sola categoría (3 high → 50)', () => {
@@ -34,7 +34,7 @@ describe('calculateRiskScore', () => {
       finding('http-headers', 'high'),
     ];
     // base 45 × (1 + 0.10) = 49.5 → round → 50
-    expect(calculateRiskScore(findings)).toEqual({ riskScore: 50, riskLevel: 'moderate' });
+    expect(calculateRiskScore(findings)).toEqual({ riskScore: 50, riskLevel: 'moderate', grade: 'C' });
   });
 
   it('suma diversidad por 5 categorías distintas hasta el tope de +50% (5 medium → 60)', () => {
@@ -46,10 +46,10 @@ describe('calculateRiskScore', () => {
       finding('server-fingerprint', 'medium'),
     ];
     // base 40 × (1 + 0.50) = 60
-    expect(calculateRiskScore(findings)).toEqual({ riskScore: 60, riskLevel: 'moderate' });
+    expect(calculateRiskScore(findings)).toEqual({ riskScore: 60, riskLevel: 'moderate', grade: 'C' });
   });
 
-  it('limita el score final a 100 (4 critical → 100 / critical)', () => {
+  it('limita el score final a 100 (4 critical → 100 / critical / grade F)', () => {
     const findings = [
       finding('tls-ssl', 'critical'),
       finding('tls-ssl', 'critical'),
@@ -57,7 +57,7 @@ describe('calculateRiskScore', () => {
       finding('tls-ssl', 'critical'),
     ];
     // base min(100,100)=100 × 1.10 = 110 → tope 100
-    expect(calculateRiskScore(findings)).toEqual({ riskScore: 100, riskLevel: 'critical' });
+    expect(calculateRiskScore(findings)).toEqual({ riskScore: 100, riskLevel: 'critical', grade: 'F' });
   });
 
   it('es determinista: el orden de entrada no cambia el resultado', () => {
@@ -75,6 +75,61 @@ describe('calculateRiskScore', () => {
   it('ignora la severidad "info" en el score base (no aporta peso)', () => {
     const findings = [finding('http-headers', 'info'), finding('cookies', 'info')];
     // base 0 → 0, y sin categorías medium+ no hay diversidad
-    expect(calculateRiskScore(findings)).toEqual({ riskScore: 0, riskLevel: 'minimal' });
+    expect(calculateRiskScore(findings)).toEqual({ riskScore: 0, riskLevel: 'minimal', grade: 'A' });
+  });
+
+  describe('grado compuesto A–F (mapeo inverso por bandas)', () => {
+    it('score 0–20 → grado A (minimal)', () => {
+      // 1 low = base 3, sin categoría medium+ → diversidad 0 → score 3
+      const findings = [finding('http-headers', 'low')];
+      const result = calculateRiskScore(findings);
+      expect(result.grade).toBe('A');
+      expect(result.riskLevel).toBe('minimal');
+    });
+
+    it('score 21–40 → grado B (low)', () => {
+      // 2 high en misma categoría = base 30 × 1.10 = 33
+      const findings = [finding('tls-ssl', 'high'), finding('tls-ssl', 'high')];
+      const result = calculateRiskScore(findings);
+      expect(result.grade).toBe('B');
+      expect(result.riskLevel).toBe('low');
+    });
+
+    it('score 41–60 → grado C (moderate)', () => {
+      // 3 high en misma categoría = base 45 × 1.10 = 49.5 → 50
+      const findings = [
+        finding('cookies', 'high'),
+        finding('cookies', 'high'),
+        finding('cookies', 'high'),
+      ];
+      const result = calculateRiskScore(findings);
+      expect(result.grade).toBe('C');
+      expect(result.riskLevel).toBe('moderate');
+    });
+
+    it('score 61–80 → grado D (high)', () => {
+      // 1 critical + 2 high en 2 categorías = base 55 × 1.20 = 66
+      const findings = [
+        finding('http-headers', 'critical'),
+        finding('tls-ssl', 'high'),
+        finding('tls-ssl', 'high'),
+      ];
+      const result = calculateRiskScore(findings);
+      expect(result.grade).toBe('D');
+      expect(result.riskLevel).toBe('high');
+    });
+
+    it('score 81–100 → grado F (critical)', () => {
+      // 4 critical = base 100 × 1.10 = tope 100
+      const findings = [
+        finding('tls-ssl', 'critical'),
+        finding('tls-ssl', 'critical'),
+        finding('tls-ssl', 'critical'),
+        finding('tls-ssl', 'critical'),
+      ];
+      const result = calculateRiskScore(findings);
+      expect(result.grade).toBe('F');
+      expect(result.riskLevel).toBe('critical');
+    });
   });
 });

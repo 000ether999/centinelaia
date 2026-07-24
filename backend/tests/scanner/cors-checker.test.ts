@@ -57,7 +57,7 @@ describe('cors-checker', () => {
 
     expect(findings).toHaveLength(1);
     expect(findings[0]!.severity).toBe('high');
-    expect(findings[0]!.category).toBe('http-headers');
+    expect(findings[0]!.category).toBe('cors');
   });
 
   it('should return severity "medium" when ACAO is wildcard without credentials', async () => {

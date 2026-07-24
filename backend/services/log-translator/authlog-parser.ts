@@ -13,6 +13,9 @@ const FAILED_PASSWORD_PATTERN = /Failed password for (?:invalid user )?(\S+) fro
 /** "Invalid user X from <IP>" */
 const INVALID_USER_PATTERN = /Invalid user \S+ from (\S+)/;
 
+/** Extrae el PID de sshd (ej. "sshd[1234]" → "1234") */
+const SSHD_PID_PATTERN = /sshd\[(\d+)\]/;
+
 /** fail2ban "Ban <IP>" */
 const BAN_PATTERN = /\bBan (\S+)/;
 
@@ -34,21 +37,45 @@ export function translateAuthLog(text: string): Finding[] {
   // Mapas de agregación
   const failedAttempts = new Map<string, number>();
   const bannedIps = new Set<string>();
+  // Deduplicación por (IP + PID): evita contar "Invalid user" + "Failed password" del mismo evento.
+  // Las dos líneas de un mismo evento comparten el PID de sshd; conexiones distintas tienen PIDs distintos.
+  const seenEvents = new Set<string>();
 
   for (const line of text.split(/\r?\n/)) {
-    // Intentos fallidos: "Failed password..."
+    // Extraer PID de sshd si existe (usado para deduplicar mismo evento)
+    const pidMatch = line.match(SSHD_PID_PATTERN);
+    const pid = pidMatch ? pidMatch[1]! : '';
+
+    // Intentos fallidos: "Failed password..." (priorizado sobre "Invalid user")
     const failedMatch = line.match(FAILED_PASSWORD_PATTERN);
     if (failedMatch) {
       const ip = failedMatch[2]!;
-      failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+      // Si hay PID, deduplicar por IP+PID; si no hay PID, siempre contar
+      if (pid) {
+        const eventKey = `${ip}|${pid}`;
+        if (!seenEvents.has(eventKey)) {
+          seenEvents.add(eventKey);
+          failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+        }
+      } else {
+        failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+      }
       continue;
     }
 
-    // Intentos fallidos: "Invalid user..."
+    // Intentos fallidos: "Invalid user..." — solo contar si no hay evento con mismo IP+PID ya registrado
     const invalidMatch = line.match(INVALID_USER_PATTERN);
     if (invalidMatch) {
       const ip = invalidMatch[1]!;
-      failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+      if (pid) {
+        const eventKey = `${ip}|${pid}`;
+        if (!seenEvents.has(eventKey)) {
+          seenEvents.add(eventKey);
+          failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+        }
+      } else {
+        failedAttempts.set(ip, (failedAttempts.get(ip) ?? 0) + 1);
+      }
       continue;
     }
 

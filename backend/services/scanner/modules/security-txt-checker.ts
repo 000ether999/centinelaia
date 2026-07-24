@@ -14,7 +14,7 @@ import type { Finding, FindingSeverity, ScanModule, ScanModuleInput } from './ty
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function finding(severity: FindingSeverity, rawValue: string | null, description: string): Finding {
-  return { category: 'http-headers', severity, rawValue, description };
+  return { category: 'security-txt', severity, rawValue, description };
 }
 
 function errorMsg(err: unknown): string {
@@ -30,7 +30,7 @@ function errorMsg(err: unknown): string {
 export function createSecurityTxtChecker(): ScanModule {
   return {
     name: 'security-txt-checker',
-    category: 'http-headers',
+    category: 'security-txt',
 
     async run(input: ScanModuleInput): Promise<Finding[]> {
       const origin = new URL(input.targetUrl).origin;

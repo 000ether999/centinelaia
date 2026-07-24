@@ -19,7 +19,7 @@ const DANGEROUS_METHODS = ['TRACE', 'PUT', 'DELETE', 'CONNECT'] as const;
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function finding(severity: FindingSeverity, rawValue: string | null, description: string): Finding {
-  return { category: 'http-headers', severity, rawValue, description };
+  return { category: 'http-methods', severity, rawValue, description };
 }
 
 function errorMsg(err: unknown): string {
@@ -35,7 +35,7 @@ function errorMsg(err: unknown): string {
 export function createHttpMethodsChecker(): ScanModule {
   return {
     name: 'http-methods-checker',
-    category: 'http-headers',
+    category: 'http-methods',
 
     async run(input: ScanModuleInput): Promise<Finding[]> {
       try {

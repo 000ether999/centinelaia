@@ -10,6 +10,8 @@ import { isAuthorized, unauthorizedResponse } from './auth.js';
 import { analyzeFindings } from '../services/ai-engine/index.js';
 import { createPersistenceClient } from '../services/ai-engine/persistence-client.js';
 import { mergeFindings } from '../services/log-translator/merge-findings.js';
+import { correlateFindings } from '../services/log-translator/correlate-findings.js';
+import { enrichWithCves } from '../services/cve-enricher/index.js';
 
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
@@ -131,8 +133,28 @@ async function handlePostAnalyze(
         authLog: typeof raw['authLog'] === 'string' ? raw['authLog'] as string : undefined,
         sourceContext: typeof raw['sourceContext'] === 'string' ? raw['sourceContext'] : undefined,
       });
-      // Reemplazar findings y sourceContext con la versión fusionada
-      raw['findings'] = mergedFindings;
+
+      // Enriquecer con CVEs conocidos (fail-open: si falla, continuar sin CVEs).
+      // Cierra el gap: hoy solo scan-handler invoca enrichWithCves, por lo que
+      // versiones de software detectadas en un log de Nmap subido a /analyze
+      // nunca se cruzaban con el NVD.
+      let enrichedFindings = mergedFindings;
+      try {
+        enrichedFindings = await enrichWithCves(mergedFindings);
+      } catch (error: unknown) {
+        console.warn(
+          '[analyze-handler] CVE enrichment failed, proceeding without CVEs:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+
+      // Correlación determinista (sin IA) por puerto/servicio y versión+CVE
+      // entre los findings de las distintas fuentes fusionadas. Defensivo:
+      // si no hay coincidencias, no agrega nada y nunca rompe el flujo.
+      const correlationFindings = correlateFindings(enrichedFindings);
+
+      // Reemplazar findings y sourceContext con la versión fusionada + enriquecida
+      raw['findings'] = [...enrichedFindings, ...correlationFindings];
       if (mergedSourceContext !== undefined) {
         raw['sourceContext'] = mergedSourceContext;
       }

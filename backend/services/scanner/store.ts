@@ -48,7 +48,7 @@ function sleep(ms: number): Promise<void> {
 function truncateIfNeeded(result: ScanResult): ScanResult {
   let serialized = JSON.stringify(result);
 
-  if (serialized.length <= MAX_ITEM_BYTES) {
+  if (Buffer.byteLength(serialized, 'utf-8') <= MAX_ITEM_BYTES) {
     return result;
   }
 
@@ -57,7 +57,7 @@ function truncateIfNeeded(result: ScanResult): ScanResult {
     if (finding.severity === 'info' && finding.rawValue !== null) {
       finding.rawValue = null;
       serialized = JSON.stringify(result);
-      if (serialized.length <= MAX_ITEM_BYTES) {
+      if (Buffer.byteLength(serialized, 'utf-8') <= MAX_ITEM_BYTES) {
         result.truncated = true;
         return result;
       }
