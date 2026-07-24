@@ -7,7 +7,7 @@ Implementación del módulo AI Engine como servicio compartido en `backend/servi
 ## Tasks
 
 - [ ] 1. Definir tipos e interfaces del módulo
-  - [ ] 1.1 Crear archivo de tipos del AI Engine
+  - [x] 1.1 Crear archivo de tipos del AI Engine
     - Crear `backend/services/ai-engine/types.ts` con todas las interfaces y tipos: `AnalysisRequest`, `AnalysisResult`, `RiskLevel`, `Explanation`, `Recommendation`, `EffortLevel`, `AnalysisMetadata`, `AnalysisStatus`, `ErrorResponse`, `BedrockExpectedResponse`, `ValidationResult`
     - Importar `Finding`, `FindingCategory`, `FindingSeverity` desde `backend/services/scanner/modules/types.ts` (reutilizar, no duplicar)
     - Exportar todos los tipos para consumo externo del módulo

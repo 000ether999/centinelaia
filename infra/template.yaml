@@ -5,7 +5,7 @@ Description: CentinelaIA Scanner - Motor de escaneo de seguridad web
 
 Globals:
   Function:
-    Runtime: nodejs20.x
+    Runtime: nodejs22.x
     Timeout: 30
     MemorySize: 256
     Environment:
@@ -16,8 +16,8 @@ Resources:
   ScanFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: dist/handlers/scan-handler.handler
-      CodeUri: backend/
+      Handler: backend/dist/handlers/scan-handler.handler
+      CodeUri: ../
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScansTable
@@ -44,7 +44,7 @@ Resources:
   ScanHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      StageName: prod
+      StageName: $default
       RouteSettings:
         "POST /scan":
           ThrottlingBurstLimit: 10
@@ -75,7 +75,101 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # ─── AI Engine Resources ──────────────────────────────────────────────────────
+
+  AnalyzeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend/dist/handlers/analyze-handler.handler
+      CodeUri: ../
+      Timeout: 29
+      MemorySize: 256
+      Environment:
+        Variables:
+          ANALYSES_TABLE: !Ref AnalysesTable
+          CACHE_TABLE: !Ref AnalysisCacheTable
+          BEDROCK_MODEL_ID: "amazon.nova-micro-v1:0"
+          BEDROCK_MAX_TOKENS: "2048"
+          BEDROCK_TEMPERATURE: "0.3"
+          CACHE_TTL_MINUTES: "60"
+          ORCHESTRATOR_TIMEOUT_MS: "25000"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalysesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AnalysisCacheTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "arn:aws:bedrock:*::foundation-model/*"
+      Events:
+        PostAnalyze:
+          Type: HttpApi
+          Properties:
+            Path: /analyze
+            Method: POST
+            ApiId: !Ref ScanHttpApi
+        GetAnalyzeById:
+          Type: HttpApi
+          Properties:
+            Path: /analyze/{analysisId}
+            Method: GET
+            ApiId: !Ref ScanHttpApi
+        GetAnalyzeBySession:
+          Type: HttpApi
+          Properties:
+            Path: /analyze
+            Method: GET
+            ApiId: !Ref ScanHttpApi
+
+  AnalysesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: centinelaia-analyses
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: analysisId
+          AttributeType: S
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: analysisId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: sessionId-timestamp-index
+          KeySchema:
+            - AttributeName: sessionId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  AnalysisCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: centinelaia-analysis-cache
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: findingsHash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: findingsHash
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
 Outputs:
   ScanApiUrl:
     Description: URL del API de escaneo
-    Value: !Sub "https://${ScanHttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Value: !Sub "https://${ScanHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  AnalyzeApiUrl:
+    Description: URL del API de análisis IA
+    Value: !Sub "https://${ScanHttpApi}.execute-api.${AWS::Region}.amazonaws.com/analyze"

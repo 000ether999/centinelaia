@@ -1,3 +1,51 @@
+# Dependencias Node.js
 node_modules/
-dist/
+
+# Salida de compilación TypeScript y empaquetado
+**/dist/
+**/build/
+*.tsbuildinfo
 *.js.map
+*.d.ts.map
+
+# Artefactos locales de AWS SAM
+.aws-sam/
+.sam-cache/
+
+# Variables de entorno y secretos locales
+.env
+.env.*
+!.env.example
+*.local
+
+# Credenciales y llaves que nunca deben publicarse
+.aws/
+.aws-credentials
+aws-credentials*
+credentials
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Configuración local para invocaciones SAM
+sam-env.json
+env.json
+samconfig.local.toml
+
+# Pruebas, cobertura, logs y temporales
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache/
+tmp/
+temp/
+
+# Sistema operativo e IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,13 @@
+# Excluir archivos innecesarios para Lambda, pero INCLUIR backend/dist/
+node_modules/
+*.ts
+!*.d.ts
+backend/tests/
+.aws-sam/
+.kiro/
+.git/
+infra/
+vitest.config.ts
+tsconfig.json
+*.js.map
+*.d.ts.map
