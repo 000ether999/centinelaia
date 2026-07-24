@@ -268,4 +268,42 @@ describe('ip-guard — isBlockedIp unit tests', () => {
     // IP pública IPv6 no debe ser bloqueada
     expect(isBlockedIPv6('2001:db8::1')).toBe(false);
   });
+
+  it('should block IPv4-mapped IPv6 addresses (SSRF bypass prevention)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // IPv4-mapped con forma dotted
+    expect(isBlockedIp('::ffff:127.0.0.1')).toBe(true);
+    expect(isBlockedIp('::ffff:10.0.0.1')).toBe(true);
+    expect(isBlockedIp('::ffff:169.254.169.254')).toBe(true);
+    expect(isBlockedIp('::ffff:192.168.1.1')).toBe(true);
+
+    // IPv4-mapped con forma hex (::ffff:7f00:1 = 127.0.0.1)
+    expect(isBlockedIp('::ffff:7f00:1')).toBe(true);
+
+    // Público sigue permitido en forma mapped
+    expect(isBlockedIp('::ffff:8.8.8.8')).toBe(false);
+  });
+
+  it('should block 0.0.0.0 and CGNAT range', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('0.0.0.0')).toBe(true);
+    expect(isBlockedIp('100.64.0.1')).toBe(true);
+  });
+
+  it('should block IPv6 unspecified address (::)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('::')).toBe(true);
+  });
+
+  it('should allow public IPs and 2001:db8::1 (documentation prefix)', async () => {
+    const { isBlockedIp, isBlockedIPv6 } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('::ffff:8.8.8.8')).toBe(false);
+    expect(isBlockedIp('8.8.8.8')).toBe(false);
+    expect(isBlockedIp('2001:db8::1')).toBe(false);
+    expect(isBlockedIPv6('2607:f8b0:4004:800::200e')).toBe(false);
+  });
 });

@@ -332,8 +332,13 @@ async function checkCipherAndCertificate(
   const cipherFindings = analyzeCipher(result.cipher);
   findings.push(...cipherFindings);
 
-  // Analizar certificado
-  const certFindings = analyzeCertificate(result.certificate, targetDomain ?? host);
+  // Analizar certificado con el veredicto real de OpenSSL
+  const certFindings = analyzeCertificate(
+    result.certificate,
+    targetDomain ?? host,
+    result.authorized,
+    result.authorizationError,
+  );
   findings.push(...certFindings);
 
   return findings;
@@ -449,10 +454,14 @@ function analyzeCipher(cipher: tls.CipherNameAndProtocol): Finding[] {
 /**
  * Analiza el certificado del servidor: expiración, cadena de confianza,
  * y coincidencia de dominio (CN/SAN).
+ * Recibe el veredicto nativo de OpenSSL (authorized/authorizationError)
+ * como fuente primaria para la validación de cadena.
  */
-function analyzeCertificate(
+export function analyzeCertificate(
   cert: tls.DetailedPeerCertificate,
   expectedDomain: string,
+  authorized: boolean,
+  authorizationError?: string,
 ): Finding[] {
   const findings: Finding[] = [];
 
@@ -471,8 +480,8 @@ function analyzeCertificate(
   const expiryFindings = checkCertificateExpiry(cert);
   findings.push(...expiryFindings);
 
-  // 2. Verificar cadena de confianza
-  const chainFindings = checkCertificateChain(cert);
+  // 2. Verificar cadena de confianza (veredicto OpenSSL + chequeo manual)
+  const chainFindings = checkCertificateChain(cert, authorized, authorizationError);
   findings.push(...chainFindings);
 
   // 3. Verificar coincidencia de dominio
@@ -535,11 +544,66 @@ function checkCertificateExpiry(cert: tls.DetailedPeerCertificate): Finding[] {
 
 /**
  * Verifica la cadena de confianza del certificado.
+ * Usa el veredicto nativo de OpenSSL (authorized/authorizationError) como
+ * fuente primaria. Mantiene chequeos manuales como complemento.
  */
-function checkCertificateChain(cert: tls.DetailedPeerCertificate): Finding[] {
+function checkCertificateChain(
+  cert: tls.DetailedPeerCertificate,
+  authorized: boolean,
+  authorizationError?: string,
+): Finding[] {
   const findings: Finding[] = [];
 
-  // Verificar si es autofirmado (issuer === subject)
+  // Fuente primaria: veredicto de OpenSSL
+  if (authorized === false && authorizationError) {
+    const errorLower = authorizationError.toLowerCase();
+
+    // Determinar descripción y severidad según el error de autorización
+    if (errorLower.includes('self_signed') || errorLower.includes('self signed')) {
+      findings.push({
+        category: 'tls-ssl',
+        severity: 'high',
+        rawValue: `authorizationError: ${authorizationError}`,
+        description: 'Certificate is self-signed and cannot be verified against a trusted Certificate Authority',
+      });
+    } else if (errorLower.includes('expired') || errorLower.includes('cert_has_expired')) {
+      findings.push({
+        category: 'tls-ssl',
+        severity: 'critical',
+        rawValue: `authorizationError: ${authorizationError}`,
+        description: 'Certificate chain verification failed: certificate has expired',
+      });
+    } else if (errorLower.includes('hostname') || errorLower.includes('host name')) {
+      findings.push({
+        category: 'tls-ssl',
+        severity: 'high',
+        rawValue: `authorizationError: ${authorizationError}`,
+        description: 'Certificate chain verification failed: hostname mismatch',
+      });
+    } else {
+      // Error genérico de verificación de cadena
+      findings.push({
+        category: 'tls-ssl',
+        severity: 'high',
+        rawValue: `authorizationError: ${authorizationError}`,
+        description: `Certificate chain is not trusted: ${authorizationError}`,
+      });
+    }
+    return findings;
+  }
+
+  // Si authorized es true, la cadena está OK — confirmación positiva
+  if (authorized === true) {
+    findings.push({
+      category: 'tls-ssl',
+      severity: 'info',
+      rawValue: `Issuer: ${formatCertName(cert.issuer)}`,
+      description: `Certificate chain is valid and trusted. Issued by: ${formatCertName(cert.issuer)}`,
+    });
+    return findings;
+  }
+
+  // Fallback: chequeos manuales si authorized no es informativo
   const isSelfSigned = isCertSelfSigned(cert);
 
   if (isSelfSigned) {
@@ -552,7 +616,6 @@ function checkCertificateChain(cert: tls.DetailedPeerCertificate): Finding[] {
     return findings;
   }
 
-  // Verificar si hay issuerCertificate (cadena presente)
   if (!cert.issuerCertificate) {
     findings.push({
       category: 'tls-ssl',

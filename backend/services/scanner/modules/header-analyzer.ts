@@ -26,7 +26,15 @@ const SECURITY_HEADERS_CONFIG: Record<string, HeaderSeverityConfig> = {
   'X-Content-Type-Options':    { absent: 'medium', insecure: 'medium' },
   'Permissions-Policy':        { absent: 'medium', insecure: 'medium' },
   'Referrer-Policy':           { absent: 'low', insecure: 'medium' },
-  'X-XSS-Protection':          { absent: 'low', insecure: 'medium' },
+};
+
+/**
+ * X-XSS-Protection está deprecado (Mozilla recomienda value "0").
+ * No se penaliza su ausencia. Si está presente con valor distinto de "0",
+ * se emite un finding informativo sugiriendo desactivarlo.
+ */
+const DEPRECATED_HEADERS: Record<string, { presentInsecure: FindingSeverity }> = {
+  'X-XSS-Protection': { presentInsecure: 'low' },
 };
 
 /** Máximo de redirecciones manuales para evitar loops infinitos */
@@ -52,14 +60,27 @@ function isInsecureValue(headerName: string, value: string): boolean {
       return normalizedValue.includes("'unsafe-inline'") || normalizedValue.includes("'unsafe-eval'");
 
     case 'strict-transport-security': {
-      // max-age menor a 86400 segundos (1 día) es insuficiente
+      // max-age menor a 31536000 (1 año) es insuficiente
       const maxAgeMatch = normalizedValue.match(/max-age\s*=\s*(\d+)/);
-      if (maxAgeMatch) {
-        const maxAge = parseInt(maxAgeMatch[1]!, 10);
-        return maxAge < 86400;
+      if (!maxAgeMatch) {
+        // Sin max-age es inválido/inseguro
+        return true;
       }
-      // Sin max-age es inválido/inseguro
-      return true;
+      const maxAge = parseInt(maxAgeMatch[1]!, 10);
+      if (maxAge < 31536000) {
+        return true;
+      }
+      // Falta includeSubDomains es inseguro
+      if (!normalizedValue.includes('includesubdomains')) {
+        return true;
+      }
+      return false;
+    }
+
+    case 'x-content-type-options': {
+      // Solo "nosniff" es un valor seguro
+      const trimmed = normalizedValue.replace(/\s/g, '');
+      return trimmed !== 'nosniff';
     }
 
     default:
@@ -176,6 +197,33 @@ function analyzeSecurityHeaders(responseHeaders: Headers): Finding[] {
         description: `Security header correctly configured: ${headerName}`,
       });
     }
+  }
+
+  // Manejar headers deprecados (X-XSS-Protection): no penalizar ausencia
+  for (const [headerName, config] of Object.entries(DEPRECATED_HEADERS)) {
+    const value = responseHeaders.get(headerName);
+
+    if (value) {
+      const trimmedValue = value.trim();
+      if (trimmedValue === '0') {
+        // Valor recomendado (desactivado) — info
+        findings.push({
+          category: 'http-headers',
+          severity: 'info',
+          rawValue: value,
+          description: `Security header correctly configured: ${headerName}`,
+        });
+      } else {
+        // Valor distinto de "0" — informativo sugiriendo desactivar
+        findings.push({
+          category: 'http-headers',
+          severity: config.presentInsecure,
+          rawValue: value,
+          description: `Deprecated header ${headerName} is present with value "${value}". Consider setting to "0" or removing it`,
+        });
+      }
+    }
+    // Ausencia: no genera finding (el header está deprecado)
   }
 
   return findings;
