@@ -103,6 +103,9 @@ export function createPersistenceClient(config?: Partial<PersistenceClientConfig
 
   /**
    * Lista resultados de análisis por sessionId (máx 20, orden desc por timestamp).
+   *
+   * Contrato de ligereza: devuelve resúmenes SIN findings ni explanations para
+   * mantener la lista liviana. getById() sí devuelve el detalle completo.
    */
   async function listBySession(sessionId: string): Promise<AnalysisResult[]> {
     try {
@@ -121,7 +124,15 @@ export function createPersistenceClient(config?: Partial<PersistenceClientConfig
       );
 
       if (!response.Items || response.Items.length === 0) return [];
-      return response.Items.map((item) => item['result'] as AnalysisResult);
+
+      // Omitir findings y explanations para que la lista sea liviana.
+      // getById() retorna el detalle completo incluyendo ambos campos.
+      return response.Items.map((item) => {
+        const full = item['result'] as AnalysisResult;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { findings: _f, explanations: _e, ...summary } = full;
+        return summary as AnalysisResult;
+      });
     } catch (error: unknown) {
       console.warn(
         '[PersistenceClient] Error al listar por sesión (fail-open):',
@@ -176,7 +187,9 @@ export function createPersistenceClient(config?: Partial<PersistenceClientConfig
 
 /**
  * Trunca el resultado para caber en el límite de DynamoDB.
- * Estrategia: eliminar texto de explanations con severity "info" primero.
+ * Estrategia 1: eliminar texto de explanations con severity "info" primero.
+ * Estrategia 2: si sigue excediendo, poner rawValue=null en findings 'info'
+ *   (serviceInfo se conserva porque es pequeño).
  */
 function truncateForStorage(result: AnalysisResult): AnalysisResult {
   const truncated = { ...result, storageTruncated: true };
@@ -189,6 +202,20 @@ function truncateForStorage(result: AnalysisResult): AnalysisResult {
     }
     return exp;
   });
+
+  // Si el resultado todavía es demasiado grande, reducir el peso de findings 'info'
+  // poniendo rawValue=null (el campo más largo) — serviceInfo se mantiene intacto
+  if (truncated.findings && truncated.findings.length > 0) {
+    const serializedAfterExp = JSON.stringify(truncated);
+    if (Buffer.byteLength(serializedAfterExp, 'utf-8') > MAX_ITEM_BYTES) {
+      truncated.findings = truncated.findings.map((f) => {
+        if (f.severity === 'info' && f.rawValue !== null) {
+          return { ...f, rawValue: null };
+        }
+        return f;
+      });
+    }
+  }
 
   return truncated;
 }

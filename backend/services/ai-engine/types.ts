@@ -43,6 +43,8 @@ export interface AnalysisResult {
   truncatedCount?: number;
   persisted?: boolean;
   storageTruncated?: boolean;
+  /** Findings analizados (los mismos que indexan explanations[].findingIndex). */
+  findings?: Finding[];
 }
 
 /** Niveles de riesgo derivados del score */

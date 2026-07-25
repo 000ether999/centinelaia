@@ -177,8 +177,12 @@ export async function analyzeFindings(
       partial: status === 'partial',
       truncated: validation.truncated,
       truncatedCount: validation.truncatedCount,
+      // Incluir los findings sanitizados para que findingIndex los indexe correctamente
+      findings,
     };
 
+    // cache.put se llama DESPUÉS de asignar result.findings,
+    // así un cache-hit posterior ya incluye el arreglo completo
     await cache.put(findingsHash, result);
     const { analysisId, persisted, storageTruncated } = await persistence.save(
       result,
@@ -208,6 +212,8 @@ function buildEmptyResult(startTime: number, executionMode: AiExecutionMode): An
     grade: 'A',
     explanations: [],
     recommendations: [],
+    // findings vacío: coherente con la alineación de índices (no hay nada que indexar)
+    findings: [],
     metadata: {
       timestamp: new Date().toISOString(),
       modelId: 'none',
