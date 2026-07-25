@@ -87,16 +87,18 @@ async function handlePostAnalyze(
     return jsonResponse(400, { error: 'Request body must be valid JSON' });
   }
 
-  // Si viene nmapOutput o authLog, fusionar findings antes de invocar el análisis
+  // Si viene nmapOutput, nmapXml o authLog, fusionar findings antes de invocar el análisis
   if (body && typeof body === 'object') {
     const raw = body as Record<string, unknown>;
     const hasNmap = typeof raw['nmapOutput'] === 'string' && (raw['nmapOutput'] as string).trim();
+    const hasNmapXml = typeof raw['nmapXml'] === 'string' && (raw['nmapXml'] as string).trim();
     const hasAuth = typeof raw['authLog'] === 'string' && (raw['authLog'] as string).trim();
 
-    if (hasNmap || hasAuth) {
+    if (hasNmap || hasNmapXml || hasAuth) {
       const { mergedFindings, mergedSourceContext } = mergeFindings({
         findings: Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [],
         nmapOutput: typeof raw['nmapOutput'] === 'string' ? raw['nmapOutput'] as string : undefined,
+        nmapXml: typeof raw['nmapXml'] === 'string' ? raw['nmapXml'] as string : undefined,
         authLog: typeof raw['authLog'] === 'string' ? raw['authLog'] as string : undefined,
         sourceContext: typeof raw['sourceContext'] === 'string' ? raw['sourceContext'] : undefined,
       });
@@ -127,6 +129,7 @@ async function handlePostAnalyze(
       }
       // Eliminar campos de log para que el validator no los vea como campos extra
       delete raw['nmapOutput'];
+      delete raw['nmapXml'];
       delete raw['authLog'];
     }
   }

@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "demo:phase3": "node backend/dist/scripts/run-scan-analysis.js",
+    "lab": "tsc && node backend/dist/scripts/lab-scan.js",
     "local": "tsc && node backend/dist/scripts/local-server.js",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -11,6 +11,7 @@
 import { resolve4, resolve6 } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { isBlockedIp } from './ip-guard.js';
+import { isLabModeEnabled } from './safe-agent.js';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,12 @@ export interface ValidationResult {
  * Acepta: example.com, sub.example.co.uk, etc.
  */
 const DOMAIN_REGEX = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+
+/**
+ * Regex para hosts sin TLD en modo laboratorio: localhost, lab, target-a, etc.
+ * Acepta nombres alfanuméricos con guiones (sin puntos requeridos ni TLD).
+ */
+const LAB_HOST_REGEX = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 
 // ─── Funciones públicas ──────────────────────────────────────────────────────
 
@@ -99,6 +106,7 @@ export async function validateScanRequest(body: unknown): Promise<ValidationResu
 /**
  * Valida y normaliza solo el target (URL, dominio o IP).
  * Extrae dominio, determina si es IP, aplica HTTPS por defecto.
+ * En modo laboratorio, acepta hosts sin TLD y puertos explícitos.
  */
 export function validateTarget(target: string): ValidationResult {
   // Longitud máxima
@@ -144,7 +152,7 @@ export function validateTarget(target: string): ValidationResult {
     };
   }
 
-  // Caso 3: Dominio sin esquema
+  // Caso 3: Dominio sin esquema (con TLD)
   if (DOMAIN_REGEX.test(target)) {
     return {
       valid: true,
@@ -154,6 +162,11 @@ export function validateTarget(target: string): ValidationResult {
         isIpAddress: false,
       },
     };
+  }
+
+  // Caso 4 (modo laboratorio): host:port o host sin TLD
+  if (isLabModeEnabled()) {
+    return validateLabTarget(target);
   }
 
   // No es nada reconocible
@@ -172,6 +185,8 @@ export function validateTarget(target: string): ValidationResult {
  *
  * Si el dominio resuelve a múltiples IPs (round-robin), TODAS se validan.
  * Si alguna cae en rango prohibido, se rechaza la solicitud completa.
+ *
+ * En modo laboratorio, permite IPs privadas sin restricción.
  */
 export async function resolveAndCheckIp(
   targetDomain: string | null,
@@ -180,9 +195,12 @@ export async function resolveAndCheckIp(
   // Si se proporcionó una IP directa, validarla
   if (targetIp) {
     if (isBlockedIp(targetIp)) {
+      if (isLabModeEnabled()) {
+        return { allowed: true, resolvedIp: targetIp };
+      }
       return {
         allowed: false,
-        error: 'Target resolves to a non-routable or private IP address',
+        error: 'Target is in a private or reserved IP range. If you are scanning your own lab assets, use lab mode (CENTINELAIA_ALLOW_PRIVATE_TARGETS=true via the CLI).',
       };
     }
     return { allowed: true, resolvedIp: targetIp };
@@ -190,6 +208,7 @@ export async function resolveAndCheckIp(
 
   // Fail-closed: sin dominio ni IP no hay nada que validar, así que no
   // podemos garantizar que el destino sea público. Rechazar por seguridad.
+  // Este caso NO se relaja ni siquiera en modo laboratorio.
   if (!targetDomain) {
     return { allowed: false, error: 'Target resolves to a non-routable or private IP address' };
   }
@@ -216,17 +235,19 @@ export async function resolveAndCheckIp(
   if (allIps.length === 0) {
     return {
       allowed: false,
-      error: 'Target resolves to a non-routable or private IP address',
+      error: `Domain "${targetDomain}" could not be resolved (no DNS records found). Verify that the domain exists and is reachable.`,
     };
   }
 
-  // Validar TODAS las IPs resueltas
-  for (const ip of allIps) {
-    if (isBlockedIp(ip)) {
-      return {
-        allowed: false,
-        error: 'Target resolves to a non-routable or private IP address',
-      };
+  // Validar TODAS las IPs resueltas (saltar en modo laboratorio)
+  if (!isLabModeEnabled()) {
+    for (const ip of allIps) {
+      if (isBlockedIp(ip)) {
+        return {
+          allowed: false,
+          error: 'Target is in a private or reserved IP range. If you are scanning your own lab assets, use lab mode (CENTINELAIA_ALLOW_PRIVATE_TARGETS=true via the CLI).',
+        };
+      }
     }
   }
 
@@ -234,6 +255,63 @@ export async function resolveAndCheckIp(
 }
 
 // ─── Funciones privadas auxiliares ───────────────────────────────────────────
+
+/**
+ * Valida targets propios de modo laboratorio: host:port o host sin TLD.
+ * Solo se invoca cuando isLabModeEnabled() es true.
+ */
+function validateLabTarget(target: string): ValidationResult {
+  // Intentar IP:port (ej. 127.0.0.1:8081, 192.168.1.50:3000)
+  const ipPortMatch = target.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5})$/);
+  if (ipPortMatch) {
+    const ip = ipPortMatch[1]!;
+    const port = Number(ipPortMatch[2]);
+    if (isIP(ip) === 4 && port > 0 && port <= 65535) {
+      return {
+        valid: true,
+        normalized: {
+          targetUrl: `http://${ip}:${port}`,
+          targetDomain: null,
+          isIpAddress: true,
+        },
+      };
+    }
+  }
+
+  // Intentar host:port (ej. localhost:8081, target-a:3000)
+  const hostPortMatch = target.match(/^([a-zA-Z0-9](?:[a-zA-Z0-9.-]{0,61}[a-zA-Z0-9])?):(\d{1,5})$/);
+  if (hostPortMatch) {
+    const host = hostPortMatch[1]!;
+    const port = Number(hostPortMatch[2]);
+    if (port > 0 && port <= 65535) {
+      return {
+        valid: true,
+        normalized: {
+          targetUrl: `http://${host}:${port}`,
+          targetDomain: host,
+          isIpAddress: false,
+        },
+      };
+    }
+  }
+
+  // Intentar host sin TLD y sin puerto (ej. localhost, lab, target-a)
+  if (LAB_HOST_REGEX.test(target)) {
+    return {
+      valid: true,
+      normalized: {
+        targetUrl: `http://${target}`,
+        targetDomain: target,
+        isIpAddress: false,
+      },
+    };
+  }
+
+  return {
+    valid: false,
+    error: { code: 400, message: 'Target is not a valid URL, domain, or IP address' },
+  };
+}
 
 function validateUrlWithScheme(target: string): ValidationResult {
   let parsed: URL;
@@ -261,12 +339,14 @@ function validateUrlWithScheme(target: string): ValidationResult {
   const ipVersion = isIP(hostname);
   const isIpAddress = ipVersion !== 0;
 
-  // Si es dominio, validar formato
+  // Si es dominio, validar formato (en modo laboratorio aceptar sin TLD)
   if (!isIpAddress && !DOMAIN_REGEX.test(hostname)) {
-    return {
-      valid: false,
-      error: { code: 400, message: 'Target is not a valid URL, domain, or IP address' },
-    };
+    if (!isLabModeEnabled() || !LAB_HOST_REGEX.test(hostname)) {
+      return {
+        valid: false,
+        error: { code: 400, message: 'Target is not a valid URL, domain, or IP address' },
+      };
+    }
   }
 
   // URL normalizada: sin fragmento

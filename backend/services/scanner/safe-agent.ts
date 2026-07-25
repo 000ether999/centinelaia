@@ -17,6 +17,47 @@ import { resolve4, resolve6 } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { isBlockedIp } from './ip-guard.js';
 
+// ─── Modo laboratorio (CLI local) ───────────────────────────────────────────
+
+/**
+ * Determina si el modo laboratorio está habilitado.
+ *
+ * El modo laboratorio permite escanear targets privados (localhost, IPs RFC1918,
+ * etc.) para uso en laboratorios de entrenamiento o auditorías de activos propios.
+ *
+ * Requiere DOS condiciones simultáneas:
+ * 1. La variable CENTINELAIA_ALLOW_PRIVATE_TARGETS === 'true'
+ * 2. El proceso NO está corriendo en AWS Lambda (AWS_LAMBDA_FUNCTION_NAME ausente o vacío)
+ *
+ * El segundo control es el candado que impide desactivar la protección SSRF
+ * en el servicio público, incluso si alguien configurara la variable por error
+ * en el despliegue. En Lambda siempre se devuelve false.
+ */
+export function isLabModeEnabled(): boolean {
+  const allowPrivate = process.env['CENTINELAIA_ALLOW_PRIVATE_TARGETS'] === 'true';
+  const inLambda = !!(process.env['AWS_LAMBDA_FUNCTION_NAME']?.trim());
+  return allowPrivate && !inLambda;
+}
+
+/** Flag para emitir el warning de modo laboratorio una sola vez por proceso. */
+let _labModeWarned = false;
+
+/**
+ * Emite un warning una sola vez por proceso indicando que la protección
+ * anti-SSRF está desactivada por modo laboratorio.
+ */
+function warnLabModeOnce(): void {
+  if (!_labModeWarned) {
+    _labModeWarned = true;
+    console.warn(
+      '\n⚠️  ═══════════════════════════════════════════════════════════════\n' +
+      '⚠️  MODO LABORATORIO ACTIVO: protección anti-SSRF DESACTIVADA.\n' +
+      '⚠️  Solo use esta configuración contra activos PROPIOS o de laboratorio.\n' +
+      '⚠️  ═══════════════════════════════════════════════════════════════\n',
+    );
+  }
+}
+
 /** Tipo del callback estándar de lookup (compatible con undici/net). */
 export type LookupCallback = (
   err: Error | null,
@@ -40,9 +81,10 @@ export function safeLookup(hostname: string, callback: LookupCallback): void {
 
   // Si es un literal IP, validar directamente sin DNS
   if (ipVersion !== 0) {
-    if (isBlockedIp(stripped)) {
+    if (isBlockedIp(stripped) && !isLabModeEnabled()) {
       callback(new Error(`Blocked IP literal: ${stripped}`), []);
     } else {
+      if (isLabModeEnabled() && isBlockedIp(stripped)) warnLabModeOnce();
       callback(null, [{ address: stripped, family: ipVersion as 4 | 6 }]);
     }
     return;
@@ -60,15 +102,19 @@ export function safeLookup(hostname: string, callback: LookupCallback): void {
       return;
     }
 
-    // Validar TODAS las IPs resueltas
-    for (const ip of allIps) {
-      if (isBlockedIp(ip)) {
-        callback(
-          new Error(`DNS rebinding blocked: ${hostname} resolved to blocked IP ${ip}`),
-          [],
-        );
-        return;
+    // Validar TODAS las IPs resueltas (saltar en modo laboratorio)
+    if (!isLabModeEnabled()) {
+      for (const ip of allIps) {
+        if (isBlockedIp(ip)) {
+          callback(
+            new Error(`DNS rebinding blocked: ${hostname} resolved to blocked IP ${ip}`),
+            [],
+          );
+          return;
+        }
       }
+    } else {
+      warnLabModeOnce();
     }
 
     // Retornar la primera IP válida con su familia
@@ -95,12 +141,16 @@ const baseConnector = buildConnector({
  * Connector envolvente que valida IP literales ANTES de conectar.
  * undici no invoca el lookup cuando el host ya es un IP literal,
  * así que esta capa intercepta ese caso y bloquea IPs privadas/reservadas.
+ * En modo laboratorio, permite la conexión a IPs privadas.
  */
 function safeConnector(options: buildConnector.Options, callback: buildConnector.Callback): void {
   const host = String(options.hostname ?? '').replace(/^\[|\]$/g, '');
   if (isIP(host) !== 0 && isBlockedIp(host)) {
-    callback(new Error(`Blocked IP literal: ${host}`), null);
-    return;
+    if (!isLabModeEnabled()) {
+      callback(new Error(`Blocked IP literal: ${host}`), null);
+      return;
+    }
+    warnLabModeOnce();
   }
   baseConnector(options, callback);
 }

@@ -137,3 +137,58 @@ Nmap done: 1 IP address (1 host up) scanned in 1.42 seconds`;
     expect(response.statusCode).toBe(400);
   });
 });
+
+
+// ─── Tests Ola 13a: nmapXml y detección automática de formato ────────────────
+
+describe('POST /translate-log — Ola 13a: nmapXml field', () => {
+  beforeEach(() => {
+    delete process.env['API_SHARED_SECRET'];
+  });
+
+  const NMAP_XML_WITH_NSE = `<?xml version="1.0"?>
+<nmaprun>
+<host>
+<ports>
+<port protocol="tcp" portid="443">
+  <state state="open" reason="syn-ack"/>
+  <service name="https" product="nginx" version="1.18.0"/>
+  <script id="ssl-cert" output="Subject: commonName=lab.local&#xa;Not valid after: 2020-01-01T00:00:00"/>
+  <script id="ssl-enum-ciphers" output="TLSv1.0:&#xa;  ciphers:&#xa;    TLS_RSA_WITH_3DES_EDE_CBC_SHA&#xa;  least strength: C"/>
+</port>
+</ports>
+</host>
+</nmaprun>`;
+
+  it('nmapXml with valid XML → 200 with findings including NSE results', async () => {
+    const event = buildEvent({ nmapXml: NMAP_XML_WITH_NSE });
+    const response = await handler(event);
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.findings).toBeDefined();
+    expect(body.findings.length).toBeGreaterThan(0);
+    // Should have port-service and tls-ssl findings from NSE
+    const categories = body.findings.map((f: any) => f.category);
+    expect(categories).toContain('port-service');
+    expect(categories).toContain('tls-ssl');
+  });
+
+  it('nmapOutput containing XML (starts with <?xml) → detected and processed as XML', async () => {
+    const event = buildEvent({ nmapOutput: NMAP_XML_WITH_NSE });
+    const response = await handler(event);
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.findings.length).toBeGreaterThan(0);
+    // Should have tls-ssl findings from NSE scripts (wouldn't appear with text parser)
+    const tlsFindings = body.findings.filter((f: any) => f.category === 'tls-ssl');
+    expect(tlsFindings.length).toBeGreaterThan(0);
+  });
+
+  it('nmapXml with malformed XML → 200 with findings: []', async () => {
+    const event = buildEvent({ nmapXml: '<broken><xml<>>' });
+    const response = await handler(event);
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.findings).toEqual([]);
+  });
+});
