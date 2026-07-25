@@ -1,16 +1,9 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { isAuthorized, unauthorizedResponse } from './auth.js';
+import { jsonResponse } from './http.js';
 import { translateNmapOutput } from '../services/log-translator/nmap-parser.js';
 import { translateAuthLog } from '../services/log-translator/authlog-parser.js';
 
-const RESPONSE_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-} as const;
-
-function jsonResponse(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return { statusCode, headers: RESPONSE_HEADERS, body: JSON.stringify(body) };
-}
 
 /** Handler liviano para traducir texto de Nmap o auth.log sin invocar el AI Engine. */
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {

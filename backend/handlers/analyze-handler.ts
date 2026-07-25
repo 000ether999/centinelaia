@@ -7,6 +7,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { isAuthorized, unauthorizedResponse } from './auth.js';
+import { jsonResponse, getMethod, getPath } from './http.js';
 import { analyzeFindings } from '../services/ai-engine/index.js';
 import { createPersistenceClient } from '../services/ai-engine/persistence-client.js';
 import { mergeFindings } from '../services/log-translator/merge-findings.js';
@@ -16,40 +17,6 @@ import { enrichWithCves } from '../services/cve-enricher/index.js';
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
 const persistence = createPersistenceClient();
-
-/** Headers CORS comunes para todas las respuestas */
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-} as const;
-
-// ─── Helpers de respuesta ────────────────────────────────────────────────────
-
-function jsonResponse(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return {
-    statusCode,
-    headers: CORS_HEADERS,
-    body: JSON.stringify(body),
-  };
-}
-
-// ─── Detección de método y path (soporta API Gateway v1 y v2) ────────────────
-
-function getMethod(event: APIGatewayProxyEvent): string {
-  const httpContext = (event.requestContext as unknown as Record<string, unknown>)['http'] as
-    | { method?: string }
-    | undefined;
-  if (httpContext?.method) return httpContext.method.toUpperCase();
-  return event.httpMethod.toUpperCase();
-}
-
-function getPath(event: APIGatewayProxyEvent): string {
-  const httpContext = (event.requestContext as unknown as Record<string, unknown>)['http'] as
-    | { path?: string }
-    | undefined;
-  if (httpContext?.path) return httpContext.path;
-  return event.path;
-}
 
 // ─── Handler principal ───────────────────────────────────────────────────────
 

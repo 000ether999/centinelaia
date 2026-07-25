@@ -4,30 +4,33 @@ CentinelaIA es un auditor de seguridad web serverless que inspecciona encabezado
 
 ## Qué hace
 
-- **Escáner de seguridad web (8 checks):** headers HTTP de seguridad, configuración TLS/SSL, cookies, registros DNS (SPF/DKIM/DMARC), fingerprinting de tecnología del servidor, verificación de CORS, métodos HTTP permitidos y presencia de security.txt.
-- **Motor de IA compartido:** traduce los hallazgos técnicos a explicaciones en lenguaje simple, calcula un score de riesgo compuesto (0-100) con grado tipo SSL Labs (A–F) y prioriza qué corregir primero.
+- **Escáner de seguridad web (10 checks):** headers HTTP de seguridad (incluyendo validación de HSTS ≥1 año + `includeSubDomains` y `nosniff` estricto), configuración TLS/SSL (con veredicto real de cadena de OpenSSL), cookies, registros DNS (SPF/DKIM/DMARC), fingerprinting de tecnología del servidor, verificación de CORS, métodos HTTP permitidos, presencia de security.txt, redirección HTTP→HTTPS, y exposición de rutas sensibles (`.git/HEAD`, `.env`, `phpinfo.php`).
+- **Motor de IA compartido:** traduce los hallazgos técnicos a explicaciones en lenguaje simple, calcula un score de riesgo compuesto (0-100) con grado tipo SSL Labs (A–F) y prioriza qué corregir primero. El score pondera por categoría: CVEs por keyword (no verificados) cuentan al 50%; las correlaciones no duplican el conteo.
 - **Traductor de logs:** parsea salidas de Nmap y logs de autenticación (auth.log/fail2ban) y los analiza con el mismo motor de IA.
-- **Enriquecimiento CVE (NVD):** cruza versiones de software detectadas (tanto por el escáner como por logs de Nmap) con la base pública de vulnerabilidades conocidas del NVD, añadiendo findings de categoría `known-vulnerabilities`.
-- **Correlación determinista:** combina hallazgos del escáner con los del log y los CVEs en un solo análisis, relacionando la misma superficie de ataque entre fuentes (categoría `correlation`). Funciona sin Bedrock — es por reglas puras.
+- **Enriquecimiento CVE (NVD + CISA KEV):** cruza versiones de software detectadas con el NVD. Los CVEs presentes en el catálogo CISA KEV (explotación activa confirmada) se marcan con `[KEV - explotación activa]` y su severidad sube un escalón.
+- **Correlación determinista (5 reglas):** combina hallazgos de múltiples fuentes en un solo análisis. Reglas activas: puerto HTTPS↔debilidad TLS, versión de servicio↔CVE, fuerza bruta SSH (auth.log)↔puerto SSH abierto (Nmap), CORS permisivo↔CSP débil, y problema de cadena TLS↔HSTS ausente. Funciona sin Bedrock — es por reglas puras y extensible (registry).
 - **Grado A–F:** además del score numérico, el motor devuelve una letra fácil de leer (A = mínimo riesgo, F = crítico), visible de forma prominente en el frontend.
-- **Historial por sesión:** los escaneos y análisis se persisten en DynamoDB, identificados por un `sessionId` simple.
+- **Historial navegable por sesión:** los escaneos y análisis se persisten en DynamoDB. El frontend permite reabrir cualquier resultado histórico desde el panel de historial (`GET /scan/{id}` y `GET /analyze/{id}`). La lista de análisis es liviana (sin findings/explanations); el detalle completo se carga bajo demanda.
+- **Export de resultados:** el panel de resultados incluye botones para exportar el análisis como JSON descargable o PDF (vía `window.print()`), sin dependencias adicionales.
 - **Frontend estático:** interfaz web ligera servida por CloudFront, con confirmación de autorización obligatoria antes de escanear.
 
 ## Categorías de hallazgos
 
 | Categoría | Fuente |
 |---|---|
-| `http-headers` | Escáner |
+| `http-headers` | Escáner (headers, HSTS, CSP, redirect HTTP→HTTPS) |
 | `tls-ssl` | Escáner |
 | `cookies` | Escáner |
 | `dns-security` | Escáner |
-| `server-fingerprint` | Escáner |
+| `server-fingerprint` | Escáner (fingerprinting de tecnología) |
 | `cors` | Escáner |
 | `http-methods` | Escáner |
 | `security-txt` | Escáner |
-| `log-analysis` | Traductor de logs (Nmap / auth.log) |
-| `known-vulnerabilities` | Enriquecimiento CVE (NVD) |
-| `correlation` | Motor de correlación determinista |
+| `port-service` | Traductor de logs (filas de Nmap con puerto/servicio/versión estructurados) |
+| `security-exposure` | Escáner (exposición de `.git`, `.env`, `phpinfo.php`) |
+| `log-analysis` | Traductor de logs (auth.log / fail2ban) |
+| `known-vulnerabilities` | Enriquecimiento CVE (NVD + CISA KEV) |
+| `correlation` | Motor de correlación determinista (5 reglas) |
 
 ## Arquitectura
 

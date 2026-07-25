@@ -6,6 +6,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { isAuthorized, unauthorizedResponse } from './auth.js';
+import { jsonResponse, getMethod, getPath } from './http.js';
 import { validateScanRequest } from '../services/scanner/validator.js';
 import { executeScan } from '../services/scanner/orchestrator.js';
 import type { OrchestratorConfig } from '../services/scanner/orchestrator.js';
@@ -28,44 +29,6 @@ import { enrichWithCves } from '../services/cve-enricher/index.js';
 
 const TABLE_NAME = process.env['SCANS_TABLE'] || 'centinelaia-scans';
 const store = createDynamoStore(TABLE_NAME);
-
-/** Headers CORS comunes para todas las respuestas */
-const CORS_HEADERS = {
-  'Content-Type': 'application/json',
-  'Access-Control-Allow-Origin': '*',
-} as const;
-
-// ─── Helpers de respuesta ────────────────────────────────────────────────────
-
-function jsonResponse(statusCode: number, body: unknown): APIGatewayProxyResult {
-  return {
-    statusCode,
-    headers: CORS_HEADERS,
-    body: JSON.stringify(body),
-  };
-}
-
-// ─── Detección de método y path (soporta API Gateway v1 y v2) ────────────────
-
-function getMethod(event: APIGatewayProxyEvent): string {
-  // v2 HTTP API
-  const httpContext = (event.requestContext as unknown as Record<string, unknown>)['http'] as
-    | { method?: string }
-    | undefined;
-  if (httpContext?.method) return httpContext.method.toUpperCase();
-  // v1 REST API
-  return event.httpMethod.toUpperCase();
-}
-
-function getPath(event: APIGatewayProxyEvent): string {
-  // v2 HTTP API
-  const httpContext = (event.requestContext as unknown as Record<string, unknown>)['http'] as
-    | { path?: string }
-    | undefined;
-  if (httpContext?.path) return httpContext.path;
-  // v1 REST API
-  return event.path;
-}
 
 // ─── Handler principal ───────────────────────────────────────────────────────
 
