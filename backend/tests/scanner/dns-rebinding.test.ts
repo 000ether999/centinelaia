@@ -306,4 +306,73 @@ describe('ip-guard — isBlockedIp unit tests', () => {
     expect(isBlockedIp('2001:db8::1')).toBe(false);
     expect(isBlockedIPv6('2607:f8b0:4004:800::200e')).toBe(false);
   });
+
+  // ─── Nuevos tests C-02: bypass por representación no canónica ────────────────
+
+  it('should block non-compressed loopback (C-02 bypass)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // Forma expandida de ::1
+    expect(isBlockedIp('0:0:0:0:0:0:0:1')).toBe(true);
+  });
+
+  it('should block non-compressed IPv4-mapped addresses (C-02 bypass)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // Forma expandida de ::ffff:127.0.0.1
+    expect(isBlockedIp('0:0:0:0:0:ffff:127.0.0.1')).toBe(true);
+    // Forma completamente expandida en hex
+    expect(isBlockedIp('0000:0000:0000:0000:0000:ffff:7f00:0001')).toBe(true);
+    // IMDS vía mapped
+    expect(isBlockedIp('0:0:0:0:0:ffff:169.254.169.254')).toBe(true);
+  });
+
+  it('should block 6to4 addresses embedding private IPv4 (C-02)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // 2002:7f00:1::1 → 6to4 con 127.0.0.1 embebida
+    expect(isBlockedIp('2002:7f00:1::1')).toBe(true);
+    // 2002:0a00:0001::1 → 6to4 con 10.0.0.1 embebida
+    expect(isBlockedIp('2002:0a00:0001::1')).toBe(true);
+  });
+
+  it('should block Teredo addresses (C-02)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // 2001:0:... es Teredo
+    expect(isBlockedIp('2001:0:0:0:0:0:0:1')).toBe(true);
+  });
+
+  it('should block link-local with zone id (C-02)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('fe80::1%eth0')).toBe(true);
+  });
+
+  it('should block ::ffff:0:0 (mapped unspecified)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('::ffff:0:0')).toBe(true);
+  });
+
+  it('should block unrecognizable strings (fail-closed)', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    expect(isBlockedIp('no-soy-una-ip')).toBe(true);
+  });
+
+  it('should NOT over-block public addresses', async () => {
+    const { isBlockedIp } = await import('../../services/scanner/ip-guard.js');
+
+    // 2001:db8::1 es documentación, pero NO privado/reservado en el sentido SSRF
+    expect(isBlockedIp('2001:db8::1')).toBe(false);
+    // Google public DNS IPv6
+    expect(isBlockedIp('2607:f8b0:4004:800::200e')).toBe(false);
+    // IPv4-mapped público
+    expect(isBlockedIp('::ffff:8.8.8.8')).toBe(false);
+    // IPv4 público
+    expect(isBlockedIp('8.8.8.8')).toBe(false);
+    // Otro público
+    expect(isBlockedIp('93.184.216.34')).toBe(false);
+  });
 });

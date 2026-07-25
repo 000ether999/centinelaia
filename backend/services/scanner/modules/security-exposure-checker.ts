@@ -13,6 +13,10 @@
  * Fail-open: errores de red son silenciosos (no emiten finding).
  * 404 y similares son silenciosos.
  * Solo 200 + evidencia real emite finding `high`.
+ *
+ * Para evitar falsos positivos (A-04), la detección de evidencia usa
+ * predicados regex estrictos en lugar de substring matching, y descarta
+ * respuestas que son HTML (SPAs que devuelven index.html para rutas 404).
  */
 
 import { getSafeAgent } from '../safe-agent.js';
@@ -25,25 +29,28 @@ const MAX_BODY_BYTES = 2048;
 
 interface SensitivePath {
   path: string;
-  /** Substrings que confirman contenido sensible real */
-  evidence: string[];
+  /** Predicado que valida el formato real del contenido sensible */
+  matches: (body: string) => boolean;
   description: string;
 }
 
 const SENSITIVE_PATHS: SensitivePath[] = [
   {
     path: '/.git/HEAD',
-    evidence: ['ref:', 'HEAD'],
+    // Formato real: "ref: refs/heads/main" o similar
+    matches: (body) => /^ref:\s*refs\//m.test(body),
     description: 'Repositorio Git expuesto públicamente — el archivo .git/HEAD es accesible',
   },
   {
     path: '/.env',
-    evidence: ['='],
+    // Formato dotenv real: KEY=value o export KEY=value
+    matches: (body) => /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/m.test(body),
     description: 'Archivo .env expuesto públicamente — variables de entorno accesibles',
   },
   {
     path: '/phpinfo.php',
-    evidence: ['PHP Version'],
+    // Contenido real de phpinfo(): "PHP Version X.Y.Z" o "PHP Version</td>"
+    matches: (body) => /PHP Version\s*(?:<|\d)/.test(body),
     description: 'phpinfo.php expuesto públicamente — información de configuración PHP accesible',
   },
 ];
@@ -88,9 +95,15 @@ async function checkPath(
     // 200 → leer solo los primeros 2 KB del body
     const bodyText = await response.text().then(t => t.slice(0, MAX_BODY_BYTES));
 
-    // Verificar que el body contenga evidencia real de contenido sensible
-    const hasEvidence = sensitive.evidence.some(token => bodyText.includes(token));
-    if (hasEvidence) {
+    // Descartar respuestas HTML (SPAs que devuelven index.html para rutas 404)
+    // Esto elimina el falso positivo A-04 donde "=" en atributos HTML
+    // disparaba high en /.env
+    if (bodyText.trimStart().startsWith('<')) {
+      return finding('info', sensitive.path, `Path accessible but no sensitive content detected: ${sensitive.path}`);
+    }
+
+    // Verificar que el body contenga evidencia real con predicado estricto
+    if (sensitive.matches(bodyText)) {
       return finding('high', sensitive.path, sensitive.description);
     }
 

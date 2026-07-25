@@ -95,8 +95,10 @@ describe('security-exposure-checker', () => {
   });
 
   it('should return severity "high" when /phpinfo.php responds 200 with PHP Version', async () => {
+    // phpinfo() en formato texto (no HTML) — el filtro HTML descarta respuestas
+    // que inician con < para eliminar falsos positivos de SPAs
     setupMockByPath({
-      '/phpinfo.php': mockTextResponse(200, '<html>PHP Version 8.2.0 details...</html>'),
+      '/phpinfo.php': mockTextResponse(200, 'PHP Version 8.2.0\nSystem: Linux...'),
     });
 
     const checker = createSecurityExposureChecker();
@@ -162,6 +164,61 @@ describe('security-exposure-checker', () => {
     expect(gitFinding).toBeDefined();
     expect(gitFinding!.severity).toBe('info');
     expect(gitFinding!.description).toContain('access denied');
+  });
+
+  // ─── Tests A-04: eliminación de falsos positivos por HTML ────────────────────
+
+  it('should NOT generate high when /.env responds 200 with HTML (A-04 false positive)', async () => {
+    // SPA que devuelve index.html para rutas desconocidas — contiene "=" en atributos
+    setupMockByPath({
+      '/.env': mockTextResponse(200, '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"></head><body><div id="app"></div></body></html>'),
+    });
+
+    const checker = createSecurityExposureChecker();
+    const findings = await checker.run(input);
+
+    const envFinding = findings.find(f => f.rawValue === '/.env');
+    expect(envFinding).toBeDefined();
+    expect(envFinding!.severity).toBe('info');
+  });
+
+  it('should generate high when /.env responds 200 with real dotenv content', async () => {
+    setupMockByPath({
+      '/.env': mockTextResponse(200, 'DB_PASSWORD=secret\nAPI_KEY=abc'),
+    });
+
+    const checker = createSecurityExposureChecker();
+    const findings = await checker.run(input);
+
+    const envFinding = findings.find(f => f.rawValue === '/.env');
+    expect(envFinding).toBeDefined();
+    expect(envFinding!.severity).toBe('high');
+  });
+
+  it('should generate high when /.git/HEAD responds 200 with real ref format', async () => {
+    setupMockByPath({
+      '/.git/HEAD': mockTextResponse(200, 'ref: refs/heads/main\n'),
+    });
+
+    const checker = createSecurityExposureChecker();
+    const findings = await checker.run(input);
+
+    const gitFinding = findings.find(f => f.rawValue === '/.git/HEAD');
+    expect(gitFinding).toBeDefined();
+    expect(gitFinding!.severity).toBe('high');
+  });
+
+  it('should NOT generate high when /.git/HEAD responds 200 with HTML containing HEAD', async () => {
+    setupMockByPath({
+      '/.git/HEAD': mockTextResponse(200, '<html><head><title>HEAD</title></head><body>Not found</body></html>'),
+    });
+
+    const checker = createSecurityExposureChecker();
+    const findings = await checker.run(input);
+
+    const gitFinding = findings.find(f => f.rawValue === '/.git/HEAD');
+    expect(gitFinding).toBeDefined();
+    expect(gitFinding!.severity).toBe('info');
   });
 });
 

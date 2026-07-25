@@ -188,9 +188,10 @@ export async function resolveAndCheckIp(
     return { allowed: true, resolvedIp: targetIp };
   }
 
-  // Si no hay dominio ni IP, permitir (caso edge: no debería ocurrir)
+  // Fail-closed: sin dominio ni IP no hay nada que validar, así que no
+  // podemos garantizar que el destino sea público. Rechazar por seguridad.
   if (!targetDomain) {
-    return { allowed: true };
+    return { allowed: false, error: 'Target resolves to a non-routable or private IP address' };
   }
 
   // Resolver DNS del dominio
@@ -283,11 +284,14 @@ function validateUrlWithScheme(target: string): ValidationResult {
 
 /**
  * Extrae la IP de una URL normalizada (ya validada).
+ * Elimina los brackets de IPv6 que URL.hostname incluye (ej. [::1] → ::1)
+ * para que isIP() pueda reconocer la dirección correctamente (C-01).
  */
 function extractIpFromUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
-    const hostname = parsed.hostname;
+    // URL.hostname devuelve brackets para IPv6 (ej. "[::1]"), los quitamos
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
     if (isIP(hostname) !== 0) {
       return hostname;
     }

@@ -5,6 +5,9 @@
  * Fuerza la petición en HTTP (aunque el target use HTTPS) y sigue hasta 3
  * redirecciones manualmente buscando un salto que eleve a HTTPS.
  *
+ * Corrige A-05: ahora sigue la cadena completa de redirects en vez de
+ * evaluar solo el primer hop, y forceHttp limpia el puerto correctamente.
+ *
  * Usa categoría existente `http-headers` (no añade categoría nueva).
  */
 
@@ -24,13 +27,18 @@ function finding(severity: FindingSeverity, description: string): Finding {
 /**
  * Construye la URL HTTP equivalente al target dado, independientemente de
  * si el target original usa HTTPS.
+ *
+ * Limpia el puerto siempre que el protocolo original sea https:, porque
+ * cualquier puerto TLS (443, 8443, etc.) no va a servir HTTP.
  */
 function forceHttp(targetUrl: string): string {
   try {
     const parsed = new URL(targetUrl);
+    const wasHttps = parsed.protocol === 'https:';
     parsed.protocol = 'http:';
-    // HTTP usa puerto 80 por defecto; eliminar puerto explícito si coincide
-    if (parsed.port === '443') parsed.port = '';
+    // Si el original era HTTPS, limpiar el puerto para usar 80 por defecto.
+    // Dejar el puerto de un target originalmente HTTP sin tocar.
+    if (wasHttps) parsed.port = '';
     return parsed.toString();
   } catch {
     return targetUrl;
@@ -64,19 +72,19 @@ export function createRedirectChecker(): ScanModule {
 
           const status = response.status;
 
-          // Respuesta final sin redirección en el primer salto
-          if (hop === 0 && (status < 300 || status >= 400)) {
-            return [finding('medium', 'No HTTP to HTTPS redirect detected')];
-          }
-
-          // Respuesta no-redirect en saltos posteriores → terminó sin subir a HTTPS
+          // Respuesta final sin redirección
           if (status < 300 || status >= 400) {
+            if (hop === 0) {
+              // Primer request no redirige → no hay upgrade HTTP→HTTPS
+              return [finding('medium', 'No HTTP to HTTPS redirect detected')];
+            }
+            // Llegamos al final de la cadena sin subir a HTTPS
             return [finding('medium', 'HTTP redirect does not upgrade to HTTPS')];
           }
 
+          // Es un redirect (3xx) — extraer Location
           const location = response.headers.get('location');
           if (!location) {
-            // Redirect sin Location header
             return [finding('medium', 'HTTP redirect does not upgrade to HTTPS')];
           }
 
@@ -87,16 +95,12 @@ export function createRedirectChecker(): ScanModule {
             return [finding('medium', 'HTTP redirect does not upgrade to HTTPS')];
           }
 
-          // ¿El primer salto eleva a HTTPS?
-          if (hop === 0 && redirectUrl.protocol === 'https:') {
+          // Si el destino es HTTPS → upgrade correcto, sin importar el hop
+          if (redirectUrl.protocol === 'https:') {
             return [finding('info', 'HTTP to HTTPS redirect correctly configured')];
           }
 
-          // El primer salto no va a HTTPS
-          if (hop === 0 && redirectUrl.protocol !== 'https:') {
-            return [finding('medium', 'HTTP redirect does not upgrade to HTTPS')];
-          }
-
+          // Destino sigue siendo HTTP → continuar siguiendo la cadena
           currentUrl = redirectUrl.href;
         }
 
