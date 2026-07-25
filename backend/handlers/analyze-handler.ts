@@ -13,6 +13,7 @@ import { createPersistenceClient } from '../services/ai-engine/persistence-clien
 import { mergeFindings } from '../services/log-translator/merge-findings.js';
 import { correlateFindings } from '../services/log-translator/correlate-findings.js';
 import { enrichWithCves } from '../services/cve-enricher/index.js';
+import { attachFindingIds } from '../services/scanner/finding-id.js';
 
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
@@ -95,8 +96,9 @@ async function handlePostAnalyze(
     const hasAuth = typeof raw['authLog'] === 'string' && (raw['authLog'] as string).trim();
 
     if (hasNmap || hasNmapXml || hasAuth) {
+      const directFindings = Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [];
       const { mergedFindings, mergedSourceContext } = mergeFindings({
-        findings: Array.isArray(raw['findings']) ? (raw['findings'] as any[]) : [],
+        findings: directFindings,
         nmapOutput: typeof raw['nmapOutput'] === 'string' ? raw['nmapOutput'] as string : undefined,
         nmapXml: typeof raw['nmapXml'] === 'string' ? raw['nmapXml'] as string : undefined,
         authLog: typeof raw['authLog'] === 'string' ? raw['authLog'] as string : undefined,
@@ -122,15 +124,41 @@ async function handlePostAnalyze(
       // si no hay coincidencias, no agrega nada y nunca rompe el flujo.
       const correlationFindings = correlateFindings(enrichedFindings);
 
+      // Asignar findingId estable a findings fusionados antes del análisis
+      const allFindings = attachFindingIds([...enrichedFindings, ...correlationFindings]);
+
       // Reemplazar findings y sourceContext con la versión fusionada + enriquecida
-      raw['findings'] = [...enrichedFindings, ...correlationFindings];
+      raw['findings'] = allFindings;
       if (mergedSourceContext !== undefined) {
         raw['sourceContext'] = mergedSourceContext;
       }
+
+      // Propagar información de fuentes para la cadena de custodia (audit)
+      const sources: string[] = [];
+      if (directFindings.length > 0) sources.push('scanner');
+      if (hasNmap) {
+        const nmapText = (raw['nmapOutput'] as string).trimStart();
+        sources.push(nmapText.startsWith('<?xml') || nmapText.startsWith('<nmaprun') ? 'nmap-xml' : 'nmap');
+      }
+      if (hasNmapXml) sources.push('nmap-xml');
+      if (hasAuth) sources.push('authlog');
+      raw['_sources'] = sources;
+
       // Eliminar campos de log para que el validator no los vea como campos extra
       delete raw['nmapOutput'];
       delete raw['nmapXml'];
       delete raw['authLog'];
+    } else {
+      // Sin fusión de logs — la fuente es solo 'scanner' si hay findings directos
+      if (Array.isArray(raw['findings']) && (raw['findings'] as unknown[]).length > 0) {
+        raw['_sources'] = ['scanner'];
+      } else {
+        raw['_sources'] = [];
+      }
+      // Asignar findingId a findings directos antes del análisis
+      if (Array.isArray(raw['findings'])) {
+        raw['findings'] = attachFindingIds(raw['findings'] as any[]);
+      }
     }
   }
 

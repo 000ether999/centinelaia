@@ -172,6 +172,27 @@ export function validateAnalysisRequest(input: unknown): ValidationResult {
     sourceContext = request.sourceContext;
   }
 
+  // Validar target opcional (max 2048 chars, para cadena de custodia)
+  let target: string | undefined;
+  if (request.target !== undefined) {
+    if (typeof request.target === 'string' && request.target.length <= 2048) {
+      target = request.target;
+    }
+    // Si no es string o excede 2048, simplemente se ignora (no rompe validación)
+  }
+
+  // Validar authorizationConfirmed opcional (boolean)
+  let authorizationConfirmed: boolean | undefined;
+  if (typeof request.authorizationConfirmed === 'boolean') {
+    authorizationConfirmed = request.authorizationConfirmed;
+  }
+
+  // Extraer _sources si fue propagado por el handler
+  let _sources: string[] | undefined;
+  if (Array.isArray(request._sources)) {
+    _sources = request._sources as string[];
+  }
+
   // Sanitizar findings (remover caracteres de control)
   let sanitizedFindings: Finding[] = findings.map((f) => {
     const finding = f as Record<string, unknown>;
@@ -192,6 +213,10 @@ export function validateAnalysisRequest(input: unknown): ValidationResult {
     // Preservar correlationInfo si existe (campo estructurado para correlation)
     if (finding.correlationInfo && typeof finding.correlationInfo === 'object') {
       sanitized.correlationInfo = finding.correlationInfo as Finding['correlationInfo'];
+    }
+    // Preservar findingId si existe (huella estable del hallazgo)
+    if (typeof finding.findingId === 'string') {
+      sanitized.findingId = finding.findingId;
     }
     return sanitized;
   });
@@ -215,6 +240,9 @@ export function validateAnalysisRequest(input: unknown): ValidationResult {
     findings: sanitizedFindings,
     sessionId: request.sessionId as string,
     ...(sourceContext !== undefined && { sourceContext }),
+    ...(target !== undefined && { target }),
+    ...(authorizationConfirmed !== undefined && { authorizationConfirmed }),
+    ...(_sources !== undefined && { _sources }),
   };
 
   return {

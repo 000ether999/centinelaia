@@ -62,6 +62,8 @@ export interface Finding {
     /** true si el riesgo NO está capturado por los findings de origen por separado. */
     emergent: boolean;
   };
+  /** Huella estable del hallazgo, para emparejar entre escaneos (ver finding-id.ts). */
+  findingId?: string;
 }
 
 /**

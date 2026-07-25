@@ -73,7 +73,7 @@ export async function analyzeFindings(
       return { error: validation.error!.message, details: validation.error };
     }
 
-    const { findings, sessionId, sourceContext } = validation.sanitizedInput!;
+    const { findings, sessionId, sourceContext, target, authorizationConfirmed, _sources } = validation.sanitizedInput!;
     const executionMode = getExecutionMode(deps);
 
     // Un análisis vacío informa el modo configurado, pero no crea ningún cliente AI.
@@ -181,6 +181,15 @@ export async function analyzeFindings(
       findings,
       hygieneScore,
       exposureScore,
+      // Cadena de custodia
+      audit: {
+        sessionId,
+        ...(target !== undefined && { target }),
+        ...(sourceContext !== undefined && { sourceContext }),
+        sources: _sources ?? (findings.length > 0 ? ['scanner'] : []),
+        ...(authorizationConfirmed !== undefined && { authorizationConfirmed }),
+        recordedAt: new Date().toISOString(),
+      },
     };
 
     // cache.put se llama DESPUÉS de asignar result.findings,

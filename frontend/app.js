@@ -396,11 +396,19 @@ elements.refreshHistory.addEventListener('click', () => void refreshHistory());
 
 elements.exportJson.addEventListener('click', () => {
   if (!lastAnalysisResult) return;
-  const blob = new Blob([JSON.stringify(lastAnalysisResult, null, 2)], { type: 'application/json' });
+  const analysisId = lastAnalysisResult.analysisId || 'sin-id';
+  const today = new Date().toISOString().slice(0, 10);
+  const exportPayload = {
+    exportedAt: new Date().toISOString(),
+    tool: 'CentinelaIA',
+    note: 'Este archivo es una copia local de conveniencia. La evidencia autoritativa y con cadena de custodia reside en GET /analyze/{analysisId}.',
+    analysis: lastAnalysisResult,
+  };
+  const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = 'centinelaia-report.json';
+  anchor.download = `centinelaia-${analysisId}-${today}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 });

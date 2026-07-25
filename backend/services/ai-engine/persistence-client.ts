@@ -125,12 +125,12 @@ export function createPersistenceClient(config?: Partial<PersistenceClientConfig
 
       if (!response.Items || response.Items.length === 0) return [];
 
-      // Omitir findings y explanations para que la lista sea liviana.
-      // getById() retorna el detalle completo incluyendo ambos campos.
+      // Omitir findings, explanations y audit para que la lista sea liviana.
+      // getById() retorna el detalle completo incluyendo todos los campos.
       return response.Items.map((item) => {
         const full = item['result'] as AnalysisResult;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { findings: _f, explanations: _e, ...summary } = full;
+        const { findings: _f, explanations: _e, audit: _a, ...summary } = full;
         return summary as AnalysisResult;
       });
     } catch (error: unknown) {
@@ -190,6 +190,9 @@ export function createPersistenceClient(config?: Partial<PersistenceClientConfig
  * Estrategia 1: eliminar texto de explanations con severity "info" primero.
  * Estrategia 2: si sigue excediendo, poner rawValue=null en findings 'info'
  *   (serviceInfo se conserva porque es pequeño).
+ *
+ * IMPORTANTE: el campo `audit` NUNCA se elimina ni trunca. Es la cadena de
+ * custodia del análisis y debe preservarse íntegra para trazabilidad.
  */
 function truncateForStorage(result: AnalysisResult): AnalysisResult {
   const truncated = { ...result, storageTruncated: true };

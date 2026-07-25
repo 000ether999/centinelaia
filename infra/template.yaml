@@ -43,6 +43,12 @@ Resources:
             Path: /scan
             Method: POST
             ApiId: !Ref ScanHttpApi
+        GetScanDiff:
+          Type: HttpApi
+          Properties:
+            Path: /scan/diff
+            Method: GET
+            ApiId: !Ref ScanHttpApi
         GetScanById:
           Type: HttpApi
           Properties:

@@ -17,11 +17,27 @@ export interface AiTextClient {
 
 // ─── Tipos de entrada ────────────────────────────────────────────────────────
 
+/** Cadena de custodia: metadatos de procedencia y autorización del análisis. */
+export interface AnalysisAudit {
+  target?: string;
+  sessionId: string;
+  sourceContext?: string;
+  sources: string[];
+  authorizationConfirmed?: boolean;
+  recordedAt: string;
+}
+
 /** Solicitud de análisis al AI Engine */
 export interface AnalysisRequest {
   findings: Finding[];
   sessionId: string;
   sourceContext?: string; // máximo 200 caracteres
+  /** Target del análisis (propagado desde el request, max 2048 chars). */
+  target?: string;
+  /** Confirmación de autorización (propagado desde el request). */
+  authorizationConfirmed?: boolean;
+  /** Fuentes que contribuyeron al análisis (propagado desde el handler). */
+  _sources?: string[];
 }
 
 // ─── Tipos de salida ─────────────────────────────────────────────────────────
@@ -49,6 +65,8 @@ export interface AnalysisResult {
   hygieneScore?: number;
   /** Score parcial solo de categorías de exposición/riesgo explotable (Ola 11, opcional para retrocompatibilidad). */
   exposureScore?: number;
+  /** Cadena de custodia: metadatos de procedencia y autorización del análisis. */
+  audit?: AnalysisAudit;
 }
 
 /** Niveles de riesgo derivados del score */

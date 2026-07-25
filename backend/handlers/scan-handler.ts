@@ -24,6 +24,8 @@ import { createSecurityExposureChecker } from '../services/scanner/modules/secur
 import type { ScanResult, ConsentEvidence } from '../models/scan.js';
 import type { ScanModuleInput } from '../services/scanner/modules/types.js';
 import { enrichWithCves } from '../services/cve-enricher/index.js';
+import { attachFindingIds } from '../services/scanner/finding-id.js';
+import { diffScans } from '../services/scanner/diff.js';
 
 // ─── Inicialización fuera del handler (reutilizada entre invocaciones) ───────
 
@@ -42,6 +44,11 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // POST /scan — ejecutar escaneo
     if (method === 'POST' && /^\/scan\/?$/.test(path)) {
       return await handlePostScan(event);
+    }
+
+    // GET /scan/diff — diff entre dos escaneos (ANTES de scanIdMatch para evitar colisión)
+    if (method === 'GET' && /^\/scan\/diff\/?$/.test(path)) {
+      return await handleScanDiff(event);
     }
 
     // GET /scan/{scanId} — obtener un resultado por ID
@@ -124,6 +131,9 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     );
   }
 
+  // Asignar findingId estable a cada finding (tras enrichment, antes de persistir)
+  enrichedFindings = attachFindingIds(enrichedFindings);
+
   // Construir evidencia de consentimiento
   const consent: ConsentEvidence = {
     authorizationConfirmed: true,
@@ -166,4 +176,26 @@ async function handleListScans(event: APIGatewayProxyEvent): Promise<APIGatewayP
 
   const results = await store.listBySession(sessionId);
   return jsonResponse(200, results);
+}
+
+async function handleScanDiff(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
+  const fromId = event.queryStringParameters?.['from'];
+  const toId = event.queryStringParameters?.['to'];
+
+  if (!fromId || !toId) {
+    return jsonResponse(400, { error: "Query parameters 'from' and 'to' are required" });
+  }
+
+  const fromScan = await store.get(fromId);
+  if (!fromScan) {
+    return jsonResponse(404, { error: `Scan '${fromId}' not found` });
+  }
+
+  const toScan = await store.get(toId);
+  if (!toScan) {
+    return jsonResponse(404, { error: `Scan '${toId}' not found` });
+  }
+
+  const result = diffScans(fromScan, toScan);
+  return jsonResponse(200, result);
 }
