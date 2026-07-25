@@ -147,6 +147,10 @@ const portWithTlsRule: CorrelationRule = {
         severity: tlsFinding.severity,
         rawValue: `port:${row.port}/${row.service} ↔ tls-ssl`,
         description,
+        correlationInfo: {
+          rule: 'port-with-tls',
+          emergent: false,
+        },
       });
     }
 
@@ -208,6 +212,10 @@ const versionWithCvesRule: CorrelationRule = {
           severity: cve.severity,
           rawValue: `port:${row.port} ↔ ${cveId}`,
           description,
+          correlationInfo: {
+            rule: 'version-with-cves',
+            emergent: false,
+          },
         });
       }
     }
@@ -277,6 +285,10 @@ const authlogSshExposureRule: CorrelationRule = {
           severity: 'high',
           rawValue: `auth:IP=${attackerIp} ↔ port:${port}/ssh`,
           description,
+          correlationInfo: {
+            rule: 'authlog-ssh-exposure',
+            emergent: true,
+          },
         });
       }
     }
@@ -326,6 +338,10 @@ const corsCspAmplificationRule: CorrelationRule = {
         severity: 'high',
         rawValue: 'cors-high ↔ csp-weak',
         description,
+        correlationInfo: {
+          rule: 'cors-csp-amplification',
+          emergent: true,
+        },
       },
     ];
   },
@@ -377,6 +393,10 @@ const certHstsGapRule: CorrelationRule = {
         severity: 'high',
         rawValue: 'tls-chain-issue ↔ hsts-missing',
         description,
+        correlationInfo: {
+          rule: 'cert-hsts-gap',
+          emergent: true,
+        },
       },
     ];
   },

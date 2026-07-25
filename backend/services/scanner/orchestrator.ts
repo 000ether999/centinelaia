@@ -26,6 +26,13 @@ export interface OrchestratorConfig {
  */
 export type OrchestratorResult = Omit<ScanResult, 'sessionId' | 'consent' | 'persisted'>;
 
+/** Resultado interno de un módulo: findings + indicador de éxito real. */
+interface ModuleOutcome {
+  findings: Finding[];
+  /** true si el módulo terminó correctamente; false si hubo timeout o error. */
+  ok: boolean;
+}
+
 /**
  * Ejecuta todos los módulos de verificación en paralelo,
  * maneja timeouts individuales y globales,
@@ -63,11 +70,16 @@ export async function executeScan(
       const mod = config.modules[i];
 
       if (result.status === 'fulfilled') {
-        allFindings.push(...result.value);
-        successCount++;
+        const outcome = result.value;
+        allFindings.push(...outcome.findings);
+        if (outcome.ok) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
       } else {
-        // El módulo falló — esto no debería pasar porque runModuleWithTimeout
-        // captura errores internamente, pero por seguridad se maneja
+        // No debería pasar porque runModuleWithTimeout siempre resuelve,
+        // pero por seguridad se maneja
         failureCount++;
         allFindings.push(createErrorFinding(mod, result.reason));
       }
@@ -92,28 +104,28 @@ export async function executeScan(
 
 /**
  * Ejecuta un módulo individual con timeout propio.
- * Si el módulo excede el timeout o lanza excepción, retorna un Finding
- * descriptivo en vez de propagar el error.
+ * Si el módulo excede el timeout o lanza excepción, retorna un ModuleOutcome
+ * con ok:false y un Finding descriptivo.
  */
 async function runModuleWithTimeout(
   mod: ScanModule,
   input: ScanModuleInput,
   timeoutMs: number,
   globalSignal: AbortSignal
-): Promise<Finding[]> {
+): Promise<ModuleOutcome> {
   // Si el timeout global ya se disparó antes de empezar
   if (globalSignal.aborted) {
-    return [createTimeoutFinding(mod, timeoutMs, 'global')];
+    return { findings: [createTimeoutFinding(mod, timeoutMs, 'global')], ok: false };
   }
 
-  return new Promise<Finding[]>((resolve) => {
+  return new Promise<ModuleOutcome>((resolve) => {
     let settled = false;
 
     // Timer individual del módulo
     const moduleTimer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        resolve([createTimeoutFinding(mod, timeoutMs, 'module')]);
+        resolve({ findings: [createTimeoutFinding(mod, timeoutMs, 'module')], ok: false });
       }
     }, timeoutMs);
 
@@ -122,7 +134,7 @@ async function runModuleWithTimeout(
       if (!settled) {
         settled = true;
         clearTimeout(moduleTimer);
-        resolve([createTimeoutFinding(mod, timeoutMs, 'global')]);
+        resolve({ findings: [createTimeoutFinding(mod, timeoutMs, 'global')], ok: false });
       }
     };
     globalSignal.addEventListener('abort', onGlobalAbort, { once: true });
@@ -135,7 +147,7 @@ async function runModuleWithTimeout(
           settled = true;
           clearTimeout(moduleTimer);
           globalSignal.removeEventListener('abort', onGlobalAbort);
-          resolve(findings);
+          resolve({ findings, ok: true });
         }
       })
       .catch((error: unknown) => {
@@ -143,7 +155,7 @@ async function runModuleWithTimeout(
           settled = true;
           clearTimeout(moduleTimer);
           globalSignal.removeEventListener('abort', onGlobalAbort);
-          resolve([createErrorFinding(mod, error)]);
+          resolve({ findings: [createErrorFinding(mod, error)], ok: false });
         }
       });
   });
@@ -151,10 +163,13 @@ async function runModuleWithTimeout(
 
 /**
  * Determina el status final del escaneo según cuántos módulos terminaron OK.
+ * - 'complete': todos los módulos terminaron sin errores ni timeouts.
+ * - 'partial': al menos un módulo tuvo éxito, pero uno o más fallaron/timeout.
+ * - 'unreachable': ningún módulo tuvo éxito (todos fallaron o agotaron timeout).
  */
 function determineStatus(
   successCount: number,
-  failureCount: number,
+  _failureCount: number,
   totalModules: number
 ): ScanStatus {
   if (totalModules === 0) {
@@ -167,7 +182,7 @@ function determineStatus(
     return 'partial';
   }
   // Todos fallaron
-  return 'partial';
+  return 'unreachable';
 }
 
 /**

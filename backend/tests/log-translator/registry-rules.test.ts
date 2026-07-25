@@ -439,3 +439,92 @@ describe('integración — las 3 reglas nuevas activas simultáneamente', () => 
     expect(newRuleCorrelations).toHaveLength(0);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Tests Ola 9: cada regla puebla correlationInfo correctamente
+// ---------------------------------------------------------------------------
+
+describe('correlationInfo — cada regla puebla rule y emergent correctamente', () => {
+  it('port-with-tls → correlationInfo.rule = "port-with-tls", emergent = false', () => {
+    const findings: Finding[] = [
+      {
+        category: 'port-service',
+        severity: 'low',
+        rawValue: '443/tcp https',
+        description: 'Puerto 443 abierto con servicio https.',
+        serviceInfo: { port: 443, protocol: 'tcp', state: 'open', service: 'https', version: '' },
+      },
+      tlsFinding('high', 'El servidor acepta TLS 1.0 (deprecated) que es vulnerable.'),
+    ];
+
+    const result = correlateFindings(findings);
+    const portTls = result.find((f) => f.rawValue?.includes('↔ tls-ssl'));
+
+    expect(portTls).toBeDefined();
+    expect(portTls!.correlationInfo).toEqual({ rule: 'port-with-tls', emergent: false });
+  });
+
+  it('version-with-cves → correlationInfo.rule = "version-with-cves", emergent = false', () => {
+    const findings: Finding[] = [
+      {
+        category: 'port-service',
+        severity: 'low',
+        rawValue: '80/tcp http nginx 1.18.0',
+        description: 'Puerto 80 abierto con nginx 1.18.0.',
+        serviceInfo: { port: 80, protocol: 'tcp', state: 'open', service: 'nginx', version: '1.18.0' },
+      },
+      {
+        category: 'known-vulnerabilities',
+        severity: 'critical',
+        rawValue: 'CVE-2021-23017 (CVSS 9.4)',
+        description: '[coincidencia aproximada] nginx 1.18.0: nginx resolver vuln description.',
+      },
+    ];
+
+    const result = correlateFindings(findings);
+    const verCve = result.find((f) => f.rawValue?.includes('↔ CVE-'));
+
+    expect(verCve).toBeDefined();
+    expect(verCve!.correlationInfo).toEqual({ rule: 'version-with-cves', emergent: false });
+  });
+
+  it('authlog-ssh-exposure → correlationInfo.rule = "authlog-ssh-exposure", emergent = true', () => {
+    const findings: Finding[] = [
+      bruteForceLogFinding('10.0.0.1'),
+      sshPortFinding(22),
+    ];
+
+    const result = correlateFindings(findings);
+    const ssh = result.find((f) => f.rawValue?.includes('↔ port:') && f.rawValue?.includes('/ssh'));
+
+    expect(ssh).toBeDefined();
+    expect(ssh!.correlationInfo).toEqual({ rule: 'authlog-ssh-exposure', emergent: true });
+  });
+
+  it('cors-csp-amplification → correlationInfo.rule = "cors-csp-amplification", emergent = true', () => {
+    const findings: Finding[] = [
+      corsFinding('high'),
+      cspFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const cors = result.find((f) => f.rawValue === 'cors-high ↔ csp-weak');
+
+    expect(cors).toBeDefined();
+    expect(cors!.correlationInfo).toEqual({ rule: 'cors-csp-amplification', emergent: true });
+  });
+
+  it('cert-hsts-gap → correlationInfo.rule = "cert-hsts-gap", emergent = true', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'El certificado es self-signed.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const cert = result.find((f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing');
+
+    expect(cert).toBeDefined();
+    expect(cert!.correlationInfo).toEqual({ rule: 'cert-hsts-gap', emergent: true });
+  });
+});

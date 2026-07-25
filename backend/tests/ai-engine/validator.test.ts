@@ -301,3 +301,73 @@ describe('validateAnalysisRequest — findings array vacío', () => {
     expect(result.sanitizedInput!.findings).toHaveLength(0);
   });
 });
+
+
+// ─── Ola 9: vulnInfo y correlationInfo sobreviven la sanitización ──────────────
+
+describe('validateAnalysisRequest — preserva vulnInfo y correlationInfo', () => {
+  it('vulnInfo se preserva en findings known-vulnerabilities', () => {
+    const vulnInfo = {
+      cveId: 'CVE-2024-0001',
+      cvssScore: 9.8,
+      kevKnownExploited: true,
+    };
+
+    const result = validateAnalysisRequest({
+      findings: [
+        {
+          category: 'known-vulnerabilities',
+          severity: 'critical',
+          rawValue: 'CVE-2024-0001 (CVSS 9.8) [KEV]',
+          description: '[KEV - explotación activa] product 1.0: vulnerability description text.',
+          vulnInfo,
+        },
+      ],
+      sessionId: 'test-session',
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.sanitizedInput!.findings[0]!.vulnInfo).toEqual(vulnInfo);
+  });
+
+  it('correlationInfo se preserva en findings correlation', () => {
+    const correlationInfo = {
+      rule: 'authlog-ssh-exposure',
+      emergent: true,
+    };
+
+    const result = validateAnalysisRequest({
+      findings: [
+        {
+          category: 'correlation',
+          severity: 'high',
+          rawValue: 'auth:IP=1.2.3.4 ↔ port:22/ssh',
+          description: 'IP atacante realizó intentos de fuerza bruta SSH (auth.log) contra puerto abierto.',
+          correlationInfo,
+        },
+      ],
+      sessionId: 'test-session',
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.sanitizedInput!.findings[0]!.correlationInfo).toEqual(correlationInfo);
+  });
+
+  it('finding sin vulnInfo ni correlationInfo no los tiene en el resultado (no se crean undefined)', () => {
+    const result = validateAnalysisRequest({
+      findings: [
+        {
+          category: 'http-headers',
+          severity: 'medium',
+          rawValue: null,
+          description: 'Standard finding without extra metadata fields here.',
+        },
+      ],
+      sessionId: 'test-session',
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.sanitizedInput!.findings[0]!.vulnInfo).toBeUndefined();
+    expect(result.sanitizedInput!.findings[0]!.correlationInfo).toBeUndefined();
+  });
+});

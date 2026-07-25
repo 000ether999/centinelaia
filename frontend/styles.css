@@ -65,6 +65,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .risk-level { margin: .2rem 0 0; font-size: 1.55rem; font-weight: 850; text-transform: capitalize; }
 .risk-grade { margin: .2rem 0 0; font-size: 2.2rem; font-weight: 900; color: var(--accent); }
 .grade-display { text-align: center; }
+.no-score-notice { padding: .85rem 1rem; border-radius: .6rem; background: var(--panel-soft); border: 1px solid var(--border); color: var(--muted); font-style: italic; margin-bottom: 1rem; }
 
 .result-list { display: grid; gap: .75rem; padding-left: 1.4rem; }
 .result-list li { padding: .9rem 1rem; border-left: 4px solid var(--accent); border-radius: .4rem; background: #091729; }

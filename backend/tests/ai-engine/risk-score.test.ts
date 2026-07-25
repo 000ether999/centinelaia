@@ -183,3 +183,148 @@ describe('calculateRiskScore — corrección de doble conteo y sobre-peso CVE', 
     expect(calculateRiskScore(shuffled)).toEqual(calculateRiskScore(findings));
   });
 });
+
+
+describe('calculateRiskScore — Ola 9: recalibración KEV y correlaciones emergentes', () => {
+  /** Helper que crea un finding con vulnInfo */
+  function cveFinding(
+    severity: FindingSeverity,
+    kevKnownExploited: boolean,
+    cveId = 'CVE-2024-0001',
+    cvssScore = 9.8,
+  ): Finding {
+    return {
+      category: 'known-vulnerabilities',
+      severity,
+      rawValue: kevKnownExploited ? `${cveId} (CVSS ${cvssScore}) [KEV]` : `${cveId} (CVSS ${cvssScore})`,
+      description: `[${kevKnownExploited ? 'KEV - explotación activa' : 'coincidencia aproximada'}] product 1.0: vuln description padding text.`,
+      vulnInfo: { cveId, cvssScore, kevKnownExploited },
+    };
+  }
+
+  /** Helper que crea un finding de correlación con correlationInfo */
+  function correlationFinding(
+    severity: FindingSeverity,
+    rule: string,
+    emergent: boolean,
+  ): Finding {
+    return {
+      category: 'correlation',
+      severity,
+      rawValue: `rule:${rule}`,
+      description: `Correlación generada por regla ${rule} para testing del score.`,
+      correlationInfo: { rule, emergent },
+    };
+  }
+
+  // ─── KEV tests ──────────────────────────────────────────────────────────────
+
+  it('CVE KEV critical (vulnInfo.kevKnownExploited: true) → cuenta a peso completo (25)', () => {
+    const findings = [cveFinding('critical', true)];
+    const result = calculateRiskScore(findings);
+    // base = 25 × 1.0 = 25, diversidad = 1 categoría → 0.10
+    // final = round(25 × 1.10) = round(27.5) = 28
+    expect(result.riskScore).toBe(28);
+    expect(result.grade).toBe('B');
+  });
+
+  it('CVE no-KEV critical → sigue contando 12.5 (no regresión de la Ola 2)', () => {
+    const findings = [cveFinding('critical', false)];
+    const result = calculateRiskScore(findings);
+    // base = 25 × 0.5 = 12.5, diversidad = 1 categoría → 0.10
+    // final = round(12.5 × 1.10) = round(13.75) = 14
+    expect(result.riskScore).toBe(14);
+    expect(result.grade).toBe('A');
+  });
+
+  it('CVE critical SIN vulnInfo → 12.5 (retrocompatible con findings antiguos)', () => {
+    const findings: Finding[] = [{
+      category: 'known-vulnerabilities',
+      severity: 'critical',
+      rawValue: 'CVE-OLD (CVSS 9.0)',
+      description: 'Finding antiguo sin vulnInfo — debe comportarse como CVE aproximado.',
+    }];
+    const result = calculateRiskScore(findings);
+    expect(result.riskScore).toBe(14); // same as no-KEV
+  });
+
+  // ─── Correlaciones emergentes tests ─────────────────────────────────────────
+
+  it('Correlación con correlationInfo.emergent: true → cuenta a peso completo y suma diversidad', () => {
+    const findings = [correlationFinding('high', 'authlog-ssh-exposure', true)];
+    const result = calculateRiskScore(findings);
+    // base = 15 × 1.0 = 15, diversidad = 1 categoría (correlation emergente cuenta) → 0.10
+    // final = round(15 × 1.10) = round(16.5) = 17
+    expect(result.riskScore).toBe(17);
+  });
+
+  it('Correlación con emergent: false → cuenta 0 y NO suma diversidad (no regresión)', () => {
+    const findings = [correlationFinding('high', 'port-with-tls', false)];
+    const result = calculateRiskScore(findings);
+    // base = 15 × 0 = 0, diversidad = 0 (excluida)
+    expect(result.riskScore).toBe(0);
+    expect(result.grade).toBe('A');
+  });
+
+  it('Correlación sin correlationInfo → cuenta 0 (retrocompatible)', () => {
+    const findings: Finding[] = [{
+      category: 'correlation',
+      severity: 'high',
+      rawValue: 'old-correlation',
+      description: 'Finding de correlación antiguo sin correlationInfo.',
+    }];
+    const result = calculateRiskScore(findings);
+    expect(result.riskScore).toBe(0);
+  });
+
+  // ─── Escenario integrado: KEV + correlación SSH emergente ───────────────────
+
+  it('Escenario integrado: CVE KEV critical + correlación SSH emergente high → grado NO es A', () => {
+    const kev = cveFinding('critical', true);
+    const ssh = correlationFinding('high', 'authlog-ssh-exposure', true);
+    const result = calculateRiskScore([kev, ssh]);
+    // base = 25×1.0 + 15×1.0 = 40
+    // diversidad = 2 categorías (known-vulnerabilities + correlation emergente) → 0.20
+    // final = round(40 × 1.20) = 48
+    expect(result.riskScore).toBe(48);
+    expect(result.grade).toBe('C');
+    expect(result.grade).not.toBe('A');
+  });
+
+  // ─── No regresión: findings del scanner siguen pesando 1.0 ──────────────────
+
+  it('findings del scanner siguen pesando 1.0 (no regresión)', () => {
+    const findings = [finding('http-headers', 'high')];
+    const result = calculateRiskScore(findings);
+    // base = 15 × 1.0 = 15, diversidad = 1 → 0.10
+    // final = round(15 × 1.10) = round(16.5) = 17
+    expect(result.riskScore).toBe(17);
+  });
+
+  // ─── Determinismo preservado ────────────────────────────────────────────────
+
+  it('determinismo preservado: barajar el orden no cambia el score', () => {
+    const items = [
+      cveFinding('critical', true),
+      correlationFinding('high', 'authlog-ssh-exposure', true),
+      finding('http-headers', 'medium'),
+    ];
+    const shuffled = [items[2]!, items[0]!, items[1]!];
+    expect(calculateRiskScore(shuffled)).toEqual(calculateRiskScore(items));
+  });
+
+  // ─── Baseline comparación ───────────────────────────────────────────────────
+
+  it('baseline scanner (2 headers high + 1 TLS high) puntúa coherentemente', () => {
+    const findings = [
+      finding('http-headers', 'high'),
+      finding('http-headers', 'high'),
+      finding('tls-ssl', 'high'),
+    ];
+    const result = calculateRiskScore(findings);
+    // base = 15+15+15 = 45, diversidad = 2 categorías → 0.20
+    // final = round(45 × 1.20) = 54
+    expect(result.riskScore).toBe(54);
+    expect(result.grade).toBe('C');
+  });
+});

@@ -9,13 +9,13 @@ import { Finding } from '../services/scanner/modules/types.js';
 /**
  * Estados posibles del resultado de un escaneo.
  * - 'complete': todos los módulos terminaron sin errores ni timeouts.
- * - 'partial': uno o más módulos fallaron o agotaron su timeout; los hallazgos
- *   de esos módulos se reemplazan por findings informativos de error/timeout.
- *
- * Nota: los estados 'unreachable' y 'error' fueron eliminados porque
- * determineStatus() en el orquestador nunca los producía — eran dead code.
+ * - 'partial': al menos un módulo tuvo éxito, pero uno o más fallaron o
+ *   agotaron su timeout; los hallazgos de esos módulos se reemplazan por
+ *   findings informativos de error/timeout.
+ * - 'unreachable': ningún módulo completó con éxito (todos fallaron o
+ *   agotaron su timeout). Indica que el escaneo no pudo medir nada útil.
  */
-export type ScanStatus = 'complete' | 'partial';
+export type ScanStatus = 'complete' | 'partial' | 'unreachable';
 
 /**
  * Resultado completo de un escaneo de seguridad.

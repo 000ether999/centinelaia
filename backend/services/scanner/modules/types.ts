@@ -44,6 +44,20 @@ export interface Finding {
     service: string;
     version: string; // "" si no se detectó
   };
+  /** Metadatos de vulnerabilidad conocida (findings 'known-vulnerabilities'). */
+  vulnInfo?: {
+    cveId: string;
+    cvssScore: number;
+    /** true si el CVE está en el catálogo CISA KEV (explotación activa confirmada). */
+    kevKnownExploited: boolean;
+  };
+  /** Metadatos de correlación entre fuentes (findings 'correlation'). */
+  correlationInfo?: {
+    /** Nombre de la regla que generó la correlación. */
+    rule: string;
+    /** true si el riesgo NO está capturado por los findings de origen por separado. */
+    emergent: boolean;
+  };
 }
 
 /**

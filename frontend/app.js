@@ -111,15 +111,33 @@ async function analyzeFindings(findings, sourceContext) {
 
 function renderAnalysis(findings, analysis) {
   lastAnalysisResult = { findings, ...analysis };
-  const score = Math.min(100, Math.max(0, Number(analysis.riskScore) || 0));
-  const scoreClass = getScoreClass(score);
   elements.resultsPanel.hidden = false;
-  elements.riskScore.textContent = String(score);
-  elements.riskGrade.textContent = analysis.grade ?? getGradeFromScore(score);
-  elements.riskLevel.textContent = analysis.riskLevel ?? scoreClass;
+
+  // Modo "sin score": si riskScore es null/undefined (no si es 0 legítimo)
+  const scoreAvailable = analysis.riskScore != null;
+
+  const scoreSection = elements.scoreGauge.closest('.score-layout');
+  const noScoreNotice = document.querySelector('#noScoreNotice');
+
+  if (!scoreAvailable) {
+    // Ocultar gauge, mostrar aviso
+    if (scoreSection) scoreSection.hidden = true;
+    if (noScoreNotice) noScoreNotice.hidden = false;
+    elements.scoreGauge.setAttribute('aria-label', 'Score no disponible para este escaneo');
+  } else {
+    // Modo normal con score
+    if (scoreSection) scoreSection.hidden = false;
+    if (noScoreNotice) noScoreNotice.hidden = true;
+    const score = Math.min(100, Math.max(0, Number(analysis.riskScore) || 0));
+    const scoreClass = getScoreClass(score);
+    elements.riskScore.textContent = String(score);
+    elements.riskGrade.textContent = analysis.grade ?? getGradeFromScore(score);
+    elements.riskLevel.textContent = analysis.riskLevel ?? scoreClass;
+    elements.scoreGauge.className = `score-gauge ${scoreClass}`;
+    elements.scoreGauge.setAttribute('aria-label', `Score de riesgo ${score} de 100`);
+  }
+
   elements.executionMode.textContent = getExecutionModeText(analysis.metadata?.executionMode);
-  elements.scoreGauge.className = `score-gauge ${scoreClass}`;
-  elements.scoreGauge.setAttribute('aria-label', `Score de riesgo ${score} de 100`);
 
   const explanationByIndex = new Map(
     (analysis.explanations ?? []).map((explanation) => [explanation.findingIndex, explanation])
@@ -280,12 +298,12 @@ function renderScanHistory(scans) {
         try {
           const detail = await requestJson(`/scan/${encodeURIComponent(scan.scanId)}`);
           renderAnalysis(detail.findings ?? [], {
-            riskScore: 0,
-            grade: '—',
-            riskLevel: '—',
+            riskScore: null,
+            grade: null,
+            riskLevel: null,
             explanations: [],
             recommendations: [],
-            metadata: detail,
+            metadata: undefined,
           });
         } catch (error) {
           setStatus(elements.historyStatus, error.message, true);

@@ -185,6 +185,14 @@ export function validateAnalysisRequest(input: unknown): ValidationResult {
     if (finding.serviceInfo && typeof finding.serviceInfo === 'object') {
       sanitized.serviceInfo = finding.serviceInfo as Finding['serviceInfo'];
     }
+    // Preservar vulnInfo si existe (campo estructurado para known-vulnerabilities)
+    if (finding.vulnInfo && typeof finding.vulnInfo === 'object') {
+      sanitized.vulnInfo = finding.vulnInfo as Finding['vulnInfo'];
+    }
+    // Preservar correlationInfo si existe (campo estructurado para correlation)
+    if (finding.correlationInfo && typeof finding.correlationInfo === 'object') {
+      sanitized.correlationInfo = finding.correlationInfo as Finding['correlationInfo'];
+    }
     return sanitized;
   });
 

@@ -5,9 +5,7 @@
  * - Ejecución correcta cuando todos los módulos terminan OK → 'complete'
  * - Módulo que lanza excepción → 'partial', finding con severity:'info'
  * - Módulo que excede timeout individual → 'partial', finding con severity:'low'
- * - Todos los módulos fallan → 'partial'
- *   NOTA: ScanStatus declara 'unreachable' y 'error', pero determineStatus()
- *   NUNCA los produce. El estado real cuando todo falla es 'partial'.
+ * - Todos los módulos fallan → 'unreachable'
  * - Sin módulos registrados → 'complete', findings vacíos
  * - Múltiples módulos OK + 1 timeout → 'partial', findings del resto presentes
  * - scanId es un UUID v4 válido
@@ -110,14 +108,12 @@ describe('executeScan — todos los módulos OK', () => {
 
 describe('executeScan — un módulo lanza excepción', () => {
   /**
-   * NOTA DE DISEÑO: runModuleWithTimeout() captura internamente cualquier
-   * excepción del módulo y la convierte en un Finding de error (severity:'info').
-   * Por ello Promise.allSettled() ve todos los módulos como "fulfilled" y
-   * successCount === totalModules → determineStatus() retorna 'complete'.
-   * El status final es 'complete', no 'partial', aunque hubo un módulo fallido.
-   * Los errores se comunican a través del finding generado, no del status.
+   * runModuleWithTimeout() captura internamente cualquier excepción del módulo
+   * y la convierte en un ModuleOutcome con ok:false y un Finding de error
+   * (severity:'info'). El status final es 'partial' porque hay módulos OK
+   * junto a uno fallido.
    */
-  it('los findings del resto de módulos están presentes y el módulo fallido produce finding severity:info', async () => {
+  it('status:partial, los findings del resto de módulos están presentes y el módulo fallido produce finding severity:info', async () => {
     const config: OrchestratorConfig = {
       moduleTimeoutMs: 5000,
       globalTimeoutMs: 25000,
@@ -130,9 +126,8 @@ describe('executeScan — un módulo lanza excepción', () => {
 
     const result = await executeScan(testInput, config);
 
-    // runModuleWithTimeout convierte el error en finding → successCount === 3 → 'complete'
-    // (ver comentario NOTA DE DISEÑO arriba)
-    expect(result.status).toBe('complete');
+    // 2 módulos OK + 1 fallido → 'partial'
+    expect(result.status).toBe('partial');
 
     // Los findings del módulo OK deben estar presentes
     expect(result.findings.some((f) => f.category === 'http-headers')).toBe(true);
@@ -153,12 +148,11 @@ describe('executeScan — un módulo lanza excepción', () => {
 
 describe('executeScan — un módulo excede el timeout individual', () => {
   /**
-   * NOTA DE DISEÑO: runModuleWithTimeout() convierte el timeout en un Finding
-   * (severity:'low') y resuelve la promesa. Por ello successCount === totalModules
-   * → determineStatus() retorna 'complete', no 'partial'.
-   * El timeout se comunica a través del finding generado, no del status.
+   * runModuleWithTimeout() convierte el timeout en un ModuleOutcome con
+   * ok:false y un Finding (severity:'low'). Con módulos OK presentes,
+   * el status es 'partial'.
    */
-  it('genera finding severity:low mencionando timeout; el módulo OK aporta sus findings', async () => {
+  it('status:partial, genera finding severity:low mencionando timeout; el módulo OK aporta sus findings', async () => {
     // moduleTimeoutMs:50ms, módulo que no resuelve en 200ms → timer se dispara
     const config: OrchestratorConfig = {
       moduleTimeoutMs: 50,
@@ -171,9 +165,8 @@ describe('executeScan — un módulo excede el timeout individual', () => {
 
     const result = await executeScan(testInput, config);
 
-    // runModuleWithTimeout convierte el timeout en finding → successCount === 2 → 'complete'
-    // (ver comentario NOTA DE DISEÑO arriba)
-    expect(result.status).toBe('complete');
+    // 1 OK + 1 timeout → 'partial'
+    expect(result.status).toBe('partial');
 
     // El módulo OK tiene sus findings
     expect(result.findings.some((f) => f.category === 'http-headers')).toBe(true);
@@ -191,15 +184,10 @@ describe('executeScan — un módulo excede el timeout individual', () => {
 
 describe('executeScan — todos los módulos fallan', () => {
   /**
-   * NOTA DE DISEÑO: ScanStatus declara 'unreachable' y 'error', pero
-   * determineStatus() NUNCA los produce. Cuando los módulos lanzan excepciones,
-   * runModuleWithTimeout() las convierte en findings de severidad 'info',
-   * por lo que Promise.allSettled() ve todos los resultados como "fulfilled".
-   * Con successCount === totalModules, determineStatus() retorna 'complete'.
-   * Los estados 'unreachable' y 'error' están reservados para uso futuro
-   * y actualmente son dead code en determineStatus().
+   * Cuando TODOS los módulos fallan (excepción o timeout), successCount === 0
+   * y determineStatus() retorna 'unreachable'. El escaneo no midió nada útil.
    */
-  it('retorna status:complete (los errores se absorben como findings; determineStatus nunca produce error/unreachable)', async () => {
+  it('retorna status:unreachable cuando todos los módulos lanzan excepciones', async () => {
     const config: OrchestratorConfig = {
       moduleTimeoutMs: 5000,
       globalTimeoutMs: 25000,
@@ -212,16 +200,31 @@ describe('executeScan — todos los módulos fallan', () => {
 
     const result = await executeScan(testInput, config);
 
-    // successCount === totalModules porque los errores se convierten en findings
-    expect(result.status).toBe('complete');
-    // Nunca produce estos estados (dead code en determineStatus)
-    expect(result.status).not.toBe('error');
-    expect(result.status).not.toBe('unreachable');
+    expect(result.status).toBe('unreachable');
 
     // Cada módulo fallido genera un finding de error (severity:'info')
     expect(result.findings).toHaveLength(3);
     expect(result.findings.every((f) => f.severity === 'info')).toBe(true);
   });
+
+  it('retorna status:unreachable cuando todos los módulos exceden timeout', async () => {
+    const config: OrchestratorConfig = {
+      moduleTimeoutMs: 50,
+      globalTimeoutMs: 10000,
+      modules: [
+        makeModule('slow1', 'http-headers', 'timeout'),
+        makeModule('slow2', 'tls-ssl', 'timeout'),
+      ],
+    };
+
+    const result = await executeScan(testInput, config);
+
+    expect(result.status).toBe('unreachable');
+
+    // Cada módulo genera un finding de timeout (severity:'low')
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.every((f) => f.severity === 'low')).toBe(true);
+  }, 3000);
 });
 
 // ─── Caso 5: Sin módulos registrados ──────────────────────────────────────────
@@ -246,11 +249,10 @@ describe('executeScan — sin módulos registrados', () => {
 
 describe('executeScan — múltiples módulos OK + 1 timeout', () => {
   /**
-   * NOTA: runModuleWithTimeout() convierte el timeout en finding → todos
-   * los módulos resuelven → status:'complete'. El timeout se evidencia
-   * mediante el finding severity:'low' generado para ese módulo.
+   * Con al menos un módulo OK y uno fallido, el status es 'partial'.
+   * El timeout se evidencia mediante el finding severity:'low' generado.
    */
-  it('status:complete; findings de los módulos OK presentes; finding timeout para el módulo lento', async () => {
+  it('status:partial; findings de los módulos OK presentes; finding timeout para el módulo lento', async () => {
     const config: OrchestratorConfig = {
       moduleTimeoutMs: 50,
       globalTimeoutMs: 10000,
@@ -264,8 +266,8 @@ describe('executeScan — múltiples módulos OK + 1 timeout', () => {
 
     const result = await executeScan(testInput, config);
 
-    // Todos los módulos resuelven (timeout convertido en finding) → 'complete'
-    expect(result.status).toBe('complete');
+    // 3 OK + 1 timeout → 'partial'
+    expect(result.status).toBe('partial');
 
     // Findings de los módulos que terminaron OK
     expect(result.findings.some((f) => f.category === 'http-headers')).toBe(true);
