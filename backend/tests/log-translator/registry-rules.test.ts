@@ -1,0 +1,441 @@
+/**
+ * Tests unitarios para las 3 reglas nuevas del registry de correlación:
+ *  - authlog-ssh-exposure
+ *  - cors-csp-amplification
+ *  - cert-hsts-gap
+ *
+ * Las 2 reglas existentes (port-with-tls, version-with-cves) ya están
+ * cubiertas en correlate-findings.test.ts y no se duplican aquí.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { correlateFindings } from '../../services/log-translator/correlate-findings.js';
+import type { Finding } from '../../services/scanner/modules/types.js';
+
+// ---------------------------------------------------------------------------
+// Helpers de construcción de findings
+// ---------------------------------------------------------------------------
+
+/** Crea un finding log-analysis simulando un evento de fuerza bruta SSH. */
+function bruteForceLogFinding(ip: string): Finding {
+  return {
+    category: 'log-analysis',
+    severity: 'high',
+    rawValue: `IP=${ip} failed_attempts=5`,
+    description: `La IP ${ip} realizó múltiples intentos de autenticación fallidos (fuerza bruta).`,
+  };
+}
+
+/** Crea un finding log-analysis simulando una acción defensiva de fail2ban. */
+function fail2banLogFinding(ip: string): Finding {
+  return {
+    category: 'log-analysis',
+    severity: 'medium',
+    rawValue: `IP=${ip} action=fail2ban`,
+    description: `La IP ${ip} fue bloqueada por fail2ban.`,
+  };
+}
+
+/** Crea un finding port-service para un puerto SSH abierto. */
+function sshPortFinding(port: number): Finding {
+  return {
+    category: 'port-service',
+    severity: 'low',
+    rawValue: `${port}/tcp ssh OpenSSH 8.9`,
+    description: `El puerto ${port}/tcp está abierto y corresponde al servicio ssh.`,
+    serviceInfo: {
+      port,
+      protocol: 'tcp',
+      state: 'open',
+      service: 'ssh',
+      version: 'OpenSSH 8.9',
+    },
+  };
+}
+
+/** Crea un finding CORS con la severidad indicada. */
+function corsFinding(severity: Finding['severity']): Finding {
+  return {
+    category: 'cors',
+    severity,
+    rawValue: 'Access-Control-Allow-Origin: *',
+    description: 'La política CORS permite cualquier origen (wildcard), exponiendo recursos a peticiones cross-origin no autorizadas.',
+  };
+}
+
+/** Crea un finding http-headers sobre CSP con la severidad indicada. */
+function cspFinding(severity: Finding['severity']): Finding {
+  return {
+    category: 'http-headers',
+    severity,
+    rawValue: null,
+    description: 'El header Content-Security-Policy no está presente o tiene directivas inseguras (unsafe-inline).',
+  };
+}
+
+/** Crea un finding http-headers sobre HSTS con la severidad indicada. */
+function hstsFinding(severity: Finding['severity']): Finding {
+  return {
+    category: 'http-headers',
+    severity,
+    rawValue: null,
+    description: 'El header Strict-Transport-Security no está configurado correctamente o está ausente.',
+  };
+}
+
+/** Crea un finding tls-ssl con la severidad y descripción indicadas. */
+function tlsFinding(severity: Finding['severity'], description: string): Finding {
+  return {
+    category: 'tls-ssl',
+    severity,
+    rawValue: null,
+    description,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests: authlog-ssh-exposure
+// ---------------------------------------------------------------------------
+
+describe('authlog-ssh-exposure — correlación fuerza bruta SSH × puerto SSH abierto', () => {
+  it('(a) IP con failed_attempts + puerto ssh abierto → 1 finding correlation high', () => {
+    const findings: Finding[] = [
+      bruteForceLogFinding('1.2.3.4'),
+      sshPortFinding(22),
+    ];
+
+    const result = correlateFindings(findings);
+
+    // Filtrar solo los findings de esta regla
+    const sshCorrelations = result.filter(
+      (f) => f.category === 'correlation' && f.rawValue?.includes('↔ port:') && f.rawValue.includes('/ssh'),
+    );
+
+    expect(sshCorrelations).toHaveLength(1);
+    expect(sshCorrelations[0]!.severity).toBe('high');
+    expect(sshCorrelations[0]!.rawValue).toBe('auth:IP=1.2.3.4 ↔ port:22/ssh');
+    expect(sshCorrelations[0]!.description).toContain('1.2.3.4');
+    expect(sshCorrelations[0]!.description).toContain('22');
+    expect(sshCorrelations[0]!.description.length).toBeLessThanOrEqual(500);
+  });
+
+  it('(b) solo fuerza bruta sin puerto SSH → []', () => {
+    const findings: Finding[] = [
+      bruteForceLogFinding('1.2.3.4'),
+      // sin ningún finding port-service con service=ssh
+    ];
+
+    const result = correlateFindings(findings);
+    const sshCorrelations = result.filter(
+      (f) => f.rawValue?.includes('↔ port:') && f.rawValue.includes('/ssh'),
+    );
+
+    expect(sshCorrelations).toHaveLength(0);
+  });
+
+  it('(c) solo puerto SSH sin fuerza bruta → []', () => {
+    const findings: Finding[] = [
+      sshPortFinding(22),
+      // sin ningún finding log-analysis con failed_attempts
+    ];
+
+    const result = correlateFindings(findings);
+    const sshCorrelations = result.filter(
+      (f) => f.rawValue?.includes('↔ port:') && f.rawValue.includes('/ssh'),
+    );
+
+    expect(sshCorrelations).toHaveLength(0);
+  });
+
+  it('(d) dedup: dos findings de fuerza bruta para la misma IP + mismo puerto → 1 solo correlation finding', () => {
+    const findings: Finding[] = [
+      // Dos eventos de fuerza bruta para la misma IP
+      bruteForceLogFinding('1.2.3.4'),
+      bruteForceLogFinding('1.2.3.4'),
+      sshPortFinding(22),
+    ];
+
+    const result = correlateFindings(findings);
+    const sshCorrelations = result.filter(
+      (f) =>
+        f.category === 'correlation' &&
+        f.rawValue === 'auth:IP=1.2.3.4 ↔ port:22/ssh',
+    );
+
+    // El dedup debe garantizar exactamente 1 finding por par (ip, port)
+    expect(sshCorrelations).toHaveLength(1);
+  });
+
+  it('fail2ban sin failed_attempts no dispara la regla', () => {
+    const findings: Finding[] = [
+      fail2banLogFinding('5.6.7.8'),
+      sshPortFinding(22),
+    ];
+
+    const result = correlateFindings(findings);
+    const sshCorrelations = result.filter(
+      (f) => f.rawValue?.includes('↔ port:') && f.rawValue.includes('/ssh'),
+    );
+
+    expect(sshCorrelations).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: cors-csp-amplification
+// ---------------------------------------------------------------------------
+
+describe('cors-csp-amplification — CORS permisivo × CSP débil', () => {
+  it('(a) CORS high + CSP con severidad high → 1 finding correlation high', () => {
+    const findings: Finding[] = [
+      corsFinding('high'),
+      cspFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const corsCorrelations = result.filter(
+      (f) => f.category === 'correlation' && f.rawValue === 'cors-high ↔ csp-weak',
+    );
+
+    expect(corsCorrelations).toHaveLength(1);
+    expect(corsCorrelations[0]!.severity).toBe('high');
+    expect(corsCorrelations[0]!.description.length).toBeLessThanOrEqual(500);
+  });
+
+  it('(a) CORS high + CSP con severidad medium → 1 finding correlation high', () => {
+    const findings: Finding[] = [
+      corsFinding('high'),
+      cspFinding('medium'),
+    ];
+
+    const result = correlateFindings(findings);
+    const corsCorrelations = result.filter(
+      (f) => f.rawValue === 'cors-high ↔ csp-weak',
+    );
+
+    expect(corsCorrelations).toHaveLength(1);
+  });
+
+  it('(b) CORS medium + CSP issue → [] (no dispara con CORS medium)', () => {
+    const findings: Finding[] = [
+      corsFinding('medium'),
+      cspFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const corsCorrelations = result.filter(
+      (f) => f.rawValue === 'cors-high ↔ csp-weak',
+    );
+
+    expect(corsCorrelations).toHaveLength(0);
+  });
+
+  it('(c) CORS high sin CSP issue → []', () => {
+    const findings: Finding[] = [
+      corsFinding('high'),
+      // sin finding http-headers sobre CSP
+    ];
+
+    const result = correlateFindings(findings);
+    const corsCorrelations = result.filter(
+      (f) => f.rawValue === 'cors-high ↔ csp-weak',
+    );
+
+    expect(corsCorrelations).toHaveLength(0);
+  });
+
+  it('máximo 1 finding aunque haya varios CORS high y varios CSP weak', () => {
+    const findings: Finding[] = [
+      corsFinding('high'),
+      corsFinding('critical'),
+      cspFinding('high'),
+      cspFinding('medium'),
+    ];
+
+    const result = correlateFindings(findings);
+    const corsCorrelations = result.filter(
+      (f) => f.rawValue === 'cors-high ↔ csp-weak',
+    );
+
+    expect(corsCorrelations).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: cert-hsts-gap
+// ---------------------------------------------------------------------------
+
+describe('cert-hsts-gap — problema de cadena TLS × HSTS débil', () => {
+  it('(a) TLS high con "self-signed" + HSTS high → 1 finding correlation high', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'El certificado es self-signed y no está firmado por una CA reconocida.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.category === 'correlation' && f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(1);
+    expect(tlsCorrelations[0]!.severity).toBe('high');
+    expect(tlsCorrelations[0]!.description.length).toBeLessThanOrEqual(500);
+  });
+
+  it('(a) TLS critical con "expired" + HSTS medium → 1 finding correlation high', () => {
+    const findings: Finding[] = [
+      tlsFinding('critical', 'El certificado TLS está expired y ha caducado hace 30 días.'),
+      hstsFinding('medium'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(1);
+  });
+
+  it('(b) TLS info (sin problema de cadena) + HSTS high → []', () => {
+    const findings: Finding[] = [
+      tlsFinding('info', 'El servidor acepta TLS 1.2 y TLS 1.3.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(0);
+  });
+
+  it('(c) TLS high con "self-signed" + HSTS info (correcto) → []', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'El certificado es self-signed.'),
+      // HSTS con info = está configurado correctamente, no es una debilidad
+      hstsFinding('info'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(0);
+  });
+
+  it('máximo 1 finding aunque haya varios TLS con cadena rota y varios HSTS débiles', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'El certificado es self-signed.'),
+      tlsFinding('critical', 'La chain del certificado no es de confianza (not trusted).'),
+      hstsFinding('high'),
+      hstsFinding('medium'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(1);
+  });
+
+  it('TLS high con "not trusted" + HSTS medium → 1 finding', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'La cadena de certificados no es de confianza (not trusted) según el almacén de CA del sistema.'),
+      hstsFinding('medium'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(1);
+  });
+
+  it('TLS high con "chain" + HSTS high → 1 finding', () => {
+    const findings: Finding[] = [
+      tlsFinding('high', 'La chain del certificado está incompleta o tiene un eslabón roto.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+    const tlsCorrelations = result.filter(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(tlsCorrelations).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test de integración: las 3 reglas nuevas juntas
+// ---------------------------------------------------------------------------
+
+describe('integración — las 3 reglas nuevas activas simultáneamente', () => {
+  it('activa las 3 reglas nuevas a la vez cuando se proveen todos los inputs', () => {
+    const findings: Finding[] = [
+      // Regla authlog-ssh-exposure
+      bruteForceLogFinding('10.0.0.1'),
+      sshPortFinding(22),
+      // Regla cors-csp-amplification
+      corsFinding('high'),
+      cspFinding('high'),
+      // Regla cert-hsts-gap
+      tlsFinding('high', 'El certificado es self-signed y no está reconocido.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+
+    const sshCorrelation = result.find(
+      (f) => f.rawValue === 'auth:IP=10.0.0.1 ↔ port:22/ssh',
+    );
+    const corsCorrelation = result.find(
+      (f) => f.rawValue === 'cors-high ↔ csp-weak',
+    );
+    const tlsCorrelation = result.find(
+      (f) => f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(sshCorrelation).toBeDefined();
+    expect(corsCorrelation).toBeDefined();
+    expect(tlsCorrelation).toBeDefined();
+
+    // Todos deben ser 'high' y de categoría 'correlation'
+    expect(sshCorrelation!.category).toBe('correlation');
+    expect(corsCorrelation!.category).toBe('correlation');
+    expect(tlsCorrelation!.category).toBe('correlation');
+  });
+
+  it('no activa ninguna regla nueva cuando faltan todas las fuentes', () => {
+    // Solo hallazgos que no gatillan ninguna de las 3 reglas nuevas
+    const findings: Finding[] = [
+      {
+        category: 'cookies',
+        severity: 'low',
+        rawValue: null,
+        description: 'La cookie de sesión no tiene el atributo Secure configurado.',
+      },
+      {
+        category: 'dns-security',
+        severity: 'medium',
+        rawValue: null,
+        description: 'No se encontró registro DMARC para el dominio.',
+      },
+    ];
+
+    const result = correlateFindings(findings);
+
+    const newRuleCorrelations = result.filter(
+      (f) =>
+        f.rawValue?.includes('/ssh') ||
+        f.rawValue === 'cors-high ↔ csp-weak' ||
+        f.rawValue === 'tls-chain-issue ↔ hsts-missing',
+    );
+
+    expect(newRuleCorrelations).toHaveLength(0);
+  });
+});
