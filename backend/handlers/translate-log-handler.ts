@@ -26,17 +26,13 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const hasAuth = typeof raw['authLog'] === 'string' && (raw['authLog'] as string).trim();
 
   if (!hasNmap && !hasAuth) {
-    return jsonResponse(400, { error: "Se requiere al menos uno de los campos 'nmapOutput' o 'authLog'." });
+    return jsonResponse(400, { error: "Se requiere al menos uno de los campos 'nmapOutput' o 'authLog' con contenido no vacío." });
   }
 
   const findings = [
     ...(hasNmap ? translateNmapOutput(raw['nmapOutput'] as string) : []),
     ...(hasAuth ? translateAuthLog(raw['authLog'] as string) : []),
   ];
-
-  if (findings.length === 0) {
-    return jsonResponse(400, { error: 'El contenido enviado no contiene datos parseables.' });
-  }
 
   return jsonResponse(200, { findings });
 }

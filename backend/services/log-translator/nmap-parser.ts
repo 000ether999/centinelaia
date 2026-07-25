@@ -1,4 +1,4 @@
-import type { Finding } from '../scanner/modules/types.js';
+import type { Finding, FindingSeverity } from '../scanner/modules/types.js';
 
 /** Fila de servicio normalizada desde la salida estándar de Nmap. */
 export interface NmapServiceRow {
@@ -10,6 +10,53 @@ export interface NmapServiceRow {
 }
 
 const SERVICE_ROW_PATTERN = /^(\d{1,5})\/(\S+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$/;
+
+// ─── Clasificación de severidad por servicio expuesto (Ola 12) ───────────────
+// Refleja el nivel de EXPOSICIÓN del servicio, no una vulnerabilidad confirmada.
+// No afirma que el servicio carezca de autenticación (no lo comprobamos).
+
+/**
+ * Servicios históricamente expuestos sin autenticación por defecto.
+ * Un redis/elasticsearch/memcached abierto es entrada directa al sistema.
+ */
+const HIGH_SEVERITY_SERVICES = new Set([
+  'redis', 'mongodb', 'elasticsearch', 'memcached',
+  'cassandra', 'couchdb', 'kibana', 'zookeeper',
+]);
+
+/**
+ * Servicios de administración, acceso remoto y bases de datos con autenticación
+ * por defecto pero con superficie de ataque significativa.
+ */
+const MEDIUM_SEVERITY_SERVICES = new Set([
+  'mysql', 'postgresql', 'mssql', 'oracle',
+  'ssh', 'telnet', 'rdp', 'ms-wbt-server', 'vnc',
+  'ftp', 'smb', 'microsoft-ds', 'netbios-ssn',
+  'ldap', 'rpcbind', 'docker', 'kubernetes',
+]);
+
+/**
+ * Determina la severidad de un servicio abierto según su tipo.
+ * Compara el nombre del servicio en minúsculas y de forma tolerante
+ * (coincide si el servicio empieza por alguno de los nombres conocidos).
+ */
+function getServiceSeverity(service: string): FindingSeverity {
+  const svc = service.toLowerCase();
+
+  // Coincidencia exacta primero
+  if (HIGH_SEVERITY_SERVICES.has(svc)) return 'high';
+  if (MEDIUM_SEVERITY_SERVICES.has(svc)) return 'medium';
+
+  // Coincidencia tolerante: el servicio empieza por alguno de los conocidos
+  for (const known of HIGH_SEVERITY_SERVICES) {
+    if (svc.startsWith(known)) return 'high';
+  }
+  for (const known of MEDIUM_SEVERITY_SERVICES) {
+    if (svc.startsWith(known)) return 'medium';
+  }
+
+  return 'low';
+}
 
 /** Extrae únicamente las filas de la tabla PORT/STATE/SERVICE/VERSION. */
 export function parseNmapServiceRows(nmapOutput: string): NmapServiceRow[] {
@@ -46,9 +93,14 @@ export function convertNmapServiceRowToFinding(row: NmapServiceRow): Finding {
   // rawValue legible (no JSON) para consumo humano
   const rawValue = `${row.port}/${row.protocol} ${row.service} ${row.version}`.trim();
 
+  // Severidad: info para no-open, clasificación por servicio para open
+  const severity: FindingSeverity = row.state === 'open'
+    ? getServiceSeverity(row.service)
+    : 'info';
+
   return {
     category: 'port-service',
-    severity: row.state === 'open' ? 'low' : 'info',
+    severity,
     rawValue,
     description: description.length <= 500 ? description : `${description.slice(0, 497)}...`,
     serviceInfo: {
