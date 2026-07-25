@@ -37,6 +37,9 @@ pero esto es una decisión de UX del producto, no una limitación de alcance té
 - Motor de escaneo: headers HTTP de seguridad, configuración TLS/SSL, cookies,
   registros DNS de seguridad (SPF/DKIM/DMARC), fingerprinting básico de
   tecnología del servidor.
+- CORS: detección de política de origen cruzado permisiva o ausente.
+- Métodos HTTP: detección de métodos peligrosos habilitados (PUT, DELETE, TRACE, etc.).
+- security.txt: verificación de existencia del archivo de divulgación responsable.
 - Motor de IA: traduce los hallazgos del scanner a explicaciones + genera un
   score de riesgo compuesto + prioriza qué arreglar primero.
 - Traductor de logs: soporta al menos un formato (salida de Nmap) subido como
@@ -45,13 +48,13 @@ pero esto es una decisión de UX del producto, no una limitación de alcance té
 - Historial de escaneos persistido (sin necesidad de cuentas de usuario
   complejas — un identificador simple de sesión/proyecto es suficiente para el
   MVP).
+- Integración con la API pública de NVD/CVE para cruzar versiones de software
+  detectadas con vulnerabilidades conocidas.
 
 ### Fase 2 — Roadmap post-hackathon (no bloquea la entrega, pero el diseño de
 Fase 1 no debe hacer imposible construir esto después)
 - Escaneo de puertos comunes y detección de servicios expuestos.
 - Soporte para más formatos de log (auth.log, fail2ban, Wireshark/pcap export).
-- Integración con la API pública de NVD/CVE para cruzar versiones de software
-  detectadas con vulnerabilidades conocidas.
 - Autenticación real de usuarios y equipos, con historial por cuenta.
 - Exportación de reportes en PDF.
 - Escaneos programados/recurrentes con alertas de cambios.

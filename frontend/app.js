@@ -40,12 +40,15 @@ const elements = {
   scanHistory: document.querySelector('#scanHistory'),
   analysisHistory: document.querySelector('#analysisHistory'),
   correlateCheckbox: document.querySelector('#correlateWithScan'),
+  exportJson: document.querySelector('#exportJson'),
+  exportPdf: document.querySelector('#exportPdf'),
 };
 
 const sessionId = getOrCreateSessionId();
 elements.sessionId.textContent = sessionId;
 let demoStarted = false;
 let lastScanFindings = null;
+let lastAnalysisResult = null;
 
 function getOrCreateSessionId() {
   const storageKey = 'centinelaia.sessionId';
@@ -107,6 +110,7 @@ async function analyzeFindings(findings, sourceContext) {
 }
 
 function renderAnalysis(findings, analysis) {
+  lastAnalysisResult = { findings, ...analysis };
   const score = Math.min(100, Math.max(0, Number(analysis.riskScore) || 0));
   const scoreClass = getScoreClass(score);
   elements.resultsPanel.hidden = false;
@@ -238,17 +242,8 @@ async function runNmapFlow() {
       body: JSON.stringify(payload),
     });
 
-    // Reconstruir la lista de findings para renderizar (directos + los fusionados)
-    const totalFindings = [...payload.findings];
-    const externalFindingsCount = (analysis.explanations?.length ?? 0) - payload.findings.length;
-    for (let i = 0; i < externalFindingsCount; i++) {
-      totalFindings.push({
-        category: isAuthLog ? 'log-analysis' : 'server-fingerprint',
-        severity: isAuthLog ? 'medium' : 'low',
-        description: `Hallazgo #${payload.findings.length + i + 1} derivado del ${isAuthLog ? 'log de autenticación' : 'log de Nmap'}.`,
-        rawValue: null,
-      });
-    }
+    // Usar los findings reales devueltos por /analyze (Ola 3b los incluye)
+    const totalFindings = analysis.findings ?? [];
 
     renderAnalysis(totalFindings, analysis);
     setStatus(elements.nmapStatus, isAuthLog ? 'Log de autenticación analizado correctamente.' : 'Salida de Nmap analizada correctamente.');
@@ -274,7 +269,30 @@ function renderScanHistory(scans) {
     title.textContent = scan.target ?? 'Objetivo no disponible';
     const details = document.createElement('span');
     details.textContent = `${formatDate(scan.timestamp)} · ${scan.totalFindings ?? scan.findings?.length ?? 0} hallazgos · ${scan.status ?? 'sin estado'}`;
-    item.append(title, details);
+    const btn = document.createElement('button');
+    btn.className = 'history-open-btn';
+    btn.textContent = 'Ver detalle';
+    btn.setAttribute('aria-label', `Ver detalle del escaneo de ${scan.target ?? 'objetivo desconocido'}`);
+    if (!scan.scanId) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', async () => {
+        try {
+          const detail = await requestJson(`/scan/${encodeURIComponent(scan.scanId)}`);
+          renderAnalysis(detail.findings ?? [], {
+            riskScore: 0,
+            grade: '—',
+            riskLevel: '—',
+            explanations: [],
+            recommendations: [],
+            metadata: detail,
+          });
+        } catch (error) {
+          setStatus(elements.historyStatus, error.message, true);
+        }
+      });
+    }
+    item.append(title, details, btn);
     elements.scanHistory.append(item);
   }
   if (scans.length === 0) appendEmpty(elements.scanHistory, 'Todavía no hay escaneos guardados.');
@@ -284,11 +302,30 @@ function renderAnalysisHistory(analyses) {
   elements.analysisHistory.replaceChildren();
   for (const analysis of analyses) {
     const item = document.createElement('li');
+    const score = analysis.riskScore ?? '—';
     const title = document.createElement('strong');
-    title.textContent = `Score ${analysis.riskScore ?? '—'}/100 · ${analysis.riskLevel ?? 'sin nivel'}`;
+    const gradePart = analysis.grade ? `${analysis.grade} · ` : '';
+    title.textContent = `${gradePart}Score ${score}/100 · ${analysis.riskLevel ?? 'sin nivel'}`;
     const details = document.createElement('span');
     details.textContent = `${formatDate(analysis.metadata?.timestamp)} · ${getExecutionModeText(analysis.metadata?.executionMode)}`;
-    item.append(title, details);
+    const btn = document.createElement('button');
+    btn.className = 'history-open-btn';
+    btn.textContent = 'Ver detalle';
+    btn.setAttribute('aria-label', `Ver detalle del análisis ${score}/100`);
+    if (!analysis.analysisId) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener('click', async () => {
+        try {
+          const detail = await requestJson(`/analyze/${encodeURIComponent(analysis.analysisId)}`);
+          renderAnalysis(detail.findings ?? [], detail);
+          elements.resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (error) {
+          setStatus(elements.historyStatus, error.message, true);
+        }
+      });
+    }
+    item.append(title, details, btn);
     elements.analysisHistory.append(item);
   }
   if (analyses.length === 0) appendEmpty(elements.analysisHistory, 'Todavía no hay análisis guardados.');
@@ -338,6 +375,22 @@ elements.nmapFile.addEventListener('change', async () => {
 });
 
 elements.refreshHistory.addEventListener('click', () => void refreshHistory());
+
+elements.exportJson.addEventListener('click', () => {
+  if (!lastAnalysisResult) return;
+  const blob = new Blob([JSON.stringify(lastAnalysisResult, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'centinelaia-report.json';
+  anchor.click();
+  URL.revokeObjectURL(url);
+});
+
+elements.exportPdf.addEventListener('click', () => {
+  window.print();
+});
+
 void refreshHistory();
 
 if (new URLSearchParams(window.location.search).get('demo') === '1' && !demoStarted) {
