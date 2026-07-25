@@ -165,6 +165,8 @@ const portWithTlsRule: CorrelationRule = {
 /**
  * Enlaza un servicio con versión detectada en Nmap con un CVE generado por
  * el cve-enricher para ese mismo producto+versión.
+ * Camino principal: compara por vulnInfo.product/version (campos estructurados).
+ * Fallback: substring en la descripción (retrocompatibilidad con findings antiguos).
  */
 const versionWithCvesRule: CorrelationRule = {
   name: 'version-with-cves',
@@ -181,24 +183,41 @@ const versionWithCvesRule: CorrelationRule = {
     for (const row of nmapRows) {
       if (!row.version) continue;
 
-      // Construir patrones de búsqueda:
-      // 1. service + version (legacy: cuando service es el producto real)
-      // 2. Cada palabra del version como producto potencial (para services genéricos)
-      const searchPatterns: string[] = [];
-      const servicePrefix = `${row.service.toLowerCase()} ${row.version}:`.toLowerCase();
-      searchPatterns.push(servicePrefix);
-
-      // Si el service es genérico (http/https/ssl/tls/unknown), también buscar
-      // el contenido del version field directamente como "{producto} {ver}:"
-      const genericServices = new Set(['http', 'https', 'ssl', 'tls', 'unknown']);
-      if (genericServices.has(row.service.toLowerCase()) && row.version.includes(' ')) {
-        // version podría ser "nginx 1.18.0" → buscar "nginx 1.18.0:"
-        searchPatterns.push(`${row.version.toLowerCase()}:`);
-      }
-
       for (const cve of cveFindings) {
-        const descLower = cve.description.toLowerCase();
-        const matches = searchPatterns.some((pattern) => descLower.includes(pattern));
+        let matches = false;
+
+        // Camino principal: comparación por campos estructurados vulnInfo.product/version
+        if (cve.vulnInfo?.product && cve.vulnInfo?.version) {
+          const cveVersion = cve.vulnInfo.version.trim().toLowerCase();
+          const cveProduct = cve.vulnInfo.product.trim().toLowerCase();
+          const rowVersion = row.version.trim().toLowerCase();
+
+          // Coincidencia directa de versión
+          if (cveVersion === rowVersion) {
+            matches = true;
+          }
+          // Producto contenido en el campo version de la fila Nmap Y la versión
+          // del CVE también está contenida (cubre servicios genéricos donde
+          // "nginx 1.18.0" vive en row.version y el CVE apunta a nginx/1.18.0)
+          else if (rowVersion.includes(cveProduct) && rowVersion.includes(cveVersion)) {
+            matches = true;
+          }
+        } else {
+          // Fallback de substring para CVEs sin vulnInfo.product/version
+          // (retrocompatibilidad con findings antiguos persistidos)
+          const searchPatterns: string[] = [];
+          const servicePrefix = `${row.service.toLowerCase()} ${row.version}:`.toLowerCase();
+          searchPatterns.push(servicePrefix);
+
+          const genericServices = new Set(['http', 'https', 'ssl', 'tls', 'unknown']);
+          if (genericServices.has(row.service.toLowerCase()) && row.version.includes(' ')) {
+            searchPatterns.push(`${row.version.toLowerCase()}:`);
+          }
+
+          const descLower = cve.description.toLowerCase();
+          matches = searchPatterns.some((pattern) => descLower.includes(pattern));
+        }
+
         if (!matches) continue;
 
         const cveId = cve.rawValue?.split(' ')[0] ?? 'un CVE conocido';
@@ -425,21 +444,30 @@ const RULES: CorrelationRule[] = [
 /**
  * Genera findings de correlación deterministas (sin IA) a partir del conjunto
  * combinado de hallazgos (scanner + Nmap + CVE + auth.log). Itera el registry
- * de reglas y acumula resultados.
+ * de reglas y acumula resultados, con aislamiento de fallos por regla.
  *
  * Es puramente defensivo: si no hay coincidencias entre fuentes, retorna un
  * arreglo vacío sin romper el flujo del caller (nunca lanza excepciones).
+ * Una regla que lance no descarta las correlaciones de las demás.
  */
 export function correlateFindings(findings: Finding[]): Finding[] {
   try {
     const result: Finding[] = [];
     for (const rule of RULES) {
-      const ruleFindings = rule.run(findings);
-      result.push(...ruleFindings);
+      try {
+        const ruleFindings = rule.run(findings);
+        result.push(...ruleFindings);
+      } catch (ruleError: unknown) {
+        // Aislamiento por regla: una regla que falle no descarta el resto
+        console.warn(
+          `[correlate-findings] Error en regla "${rule.name}", se omite:`,
+          ruleError instanceof Error ? ruleError.message : ruleError,
+        );
+      }
     }
     return result;
   } catch (error: unknown) {
-    // Fail-open: la correlación es un extra, nunca debe romper el análisis.
+    // Red de seguridad final: fallo del propio bucle/infraestructura
     console.warn(
       '[correlate-findings] Error durante la correlación, se omite sin romper el flujo:',
       error instanceof Error ? error.message : error,

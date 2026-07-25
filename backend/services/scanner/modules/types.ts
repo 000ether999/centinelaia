@@ -50,6 +50,10 @@ export interface Finding {
     cvssScore: number;
     /** true si el CVE está en el catálogo CISA KEV (explotación activa confirmada). */
     kevKnownExploited: boolean;
+    /** Producto normalizado que originó la consulta al NVD. */
+    product?: string;
+    /** Versión detectada que originó la consulta al NVD. */
+    version?: string;
   };
   /** Metadatos de correlación entre fuentes (findings 'correlation'). */
   correlationInfo?: {

@@ -247,3 +247,70 @@ describe('header-analyzer', () => {
     expect(ssrfFinding!.category).toBe('http-headers');
   });
 });
+
+
+// ─── Tests Ola 10: X-Content-Type-Options con espacios internos (B-04) ───────
+
+describe('header-analyzer — X-Content-Type-Options edge cases (B-04)', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockResolveAndCheckIp.mockReset();
+  });
+
+  it('"no sniff" (con espacio interno) → inseguro', async () => {
+    mockFetch.mockResolvedValue(mockResponse(200, {
+      'Content-Security-Policy': "default-src 'self'",
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'no sniff',
+      'Permissions-Policy': 'camera=()',
+      'Referrer-Policy': 'no-referrer',
+    }));
+
+    const analyzer = createHeaderAnalyzer();
+    const findings = await analyzer.run(input);
+
+    const xcto = findings.find(f => f.description.includes('X-Content-Type-Options'));
+    expect(xcto).toBeDefined();
+    expect(xcto!.severity).toBe('medium');
+    expect(xcto!.description).toContain('insecure value');
+  });
+
+  it('" nosniff " (con espacios en los extremos) → seguro', async () => {
+    mockFetch.mockResolvedValue(mockResponse(200, {
+      'Content-Security-Policy': "default-src 'self'",
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': ' nosniff ',
+      'Permissions-Policy': 'camera=()',
+      'Referrer-Policy': 'no-referrer',
+    }));
+
+    const analyzer = createHeaderAnalyzer();
+    const findings = await analyzer.run(input);
+
+    const xcto = findings.find(f => f.description.includes('X-Content-Type-Options'));
+    expect(xcto).toBeDefined();
+    expect(xcto!.severity).toBe('info');
+    expect(xcto!.description).toContain('correctly configured');
+  });
+
+  it('"NOSNIFF" (uppercase) → seguro', async () => {
+    mockFetch.mockResolvedValue(mockResponse(200, {
+      'Content-Security-Policy': "default-src 'self'",
+      'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'NOSNIFF',
+      'Permissions-Policy': 'camera=()',
+      'Referrer-Policy': 'no-referrer',
+    }));
+
+    const analyzer = createHeaderAnalyzer();
+    const findings = await analyzer.run(input);
+
+    const xcto = findings.find(f => f.description.includes('X-Content-Type-Options'));
+    expect(xcto).toBeDefined();
+    expect(xcto!.severity).toBe('info');
+    expect(xcto!.description).toContain('correctly configured');
+  });
+});

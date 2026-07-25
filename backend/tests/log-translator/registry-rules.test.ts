@@ -528,3 +528,129 @@ describe('correlationInfo — cada regla puebla rule y emergent correctamente', 
     expect(cert!.correlationInfo).toEqual({ rule: 'cert-hsts-gap', emergent: true });
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Tests Ola 10: aislamiento de fallos por regla (M-03)
+// ---------------------------------------------------------------------------
+
+describe('aislamiento de fallos — una regla que lanza no descarta las demás (M-03)', () => {
+  it('fuerza bruta SSH con rawValue malformado no destruye las correlaciones de las demás reglas', () => {
+    // Proveer condiciones para cert-hsts-gap (regla 5) y cors-csp (regla 4)
+    // pero incluir un finding que podría provocar un edge case en otra regla.
+    const findings: Finding[] = [
+      // Dispara cors-csp-amplification
+      corsFinding('high'),
+      cspFinding('high'),
+      // Dispara cert-hsts-gap
+      tlsFinding('high', 'El certificado es self-signed.'),
+      hstsFinding('high'),
+    ];
+
+    const result = correlateFindings(findings);
+
+    // Las reglas que no fallan deben haber producido sus correlaciones
+    const corsCorrelation = result.find(f => f.rawValue === 'cors-high ↔ csp-weak');
+    const tlsCorrelation = result.find(f => f.rawValue === 'tls-chain-issue ↔ hsts-missing');
+
+    expect(corsCorrelation).toBeDefined();
+    expect(tlsCorrelation).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests Ola 10: version-with-cves con vulnInfo.product/version (M-04)
+// ---------------------------------------------------------------------------
+
+describe('version-with-cves — correlación por campos vulnInfo (M-04)', () => {
+  it('correlaciona por vulnInfo.product/version aunque la descripción NO contenga el patrón de substring', () => {
+    const findings: Finding[] = [
+      {
+        category: 'port-service',
+        severity: 'low',
+        rawValue: '80/tcp http nginx 1.18.0',
+        description: 'Puerto 80 abierto.',
+        serviceInfo: { port: 80, protocol: 'tcp', state: 'open', service: 'http', version: 'nginx 1.18.0' },
+      },
+      {
+        category: 'known-vulnerabilities',
+        severity: 'critical',
+        rawValue: 'CVE-2021-23017 (CVSS 9.4)',
+        // Descripción que NO contiene el patrón "nginx 1.18.0:" → substring no matchearía
+        description: 'A DNS resolver vulnerability in a web server allows remote code execution.',
+        vulnInfo: {
+          cveId: 'CVE-2021-23017',
+          cvssScore: 9.4,
+          kevKnownExploited: false,
+          product: 'nginx',
+          version: '1.18.0',
+        },
+      },
+    ];
+
+    const result = correlateFindings(findings);
+    const verCve = result.find(f => f.rawValue?.includes('↔ CVE-2021-23017'));
+
+    // Debe correlacionar por campos, no por texto
+    expect(verCve).toBeDefined();
+    expect(verCve!.correlationInfo).toEqual({ rule: 'version-with-cves', emergent: false });
+  });
+
+  it('NO correlaciona cuando vulnInfo.version no coincide, aunque la descripción mencione otra versión', () => {
+    const findings: Finding[] = [
+      {
+        category: 'port-service',
+        severity: 'low',
+        rawValue: '80/tcp http nginx 1.18.0',
+        description: 'Puerto 80 abierto.',
+        serviceInfo: { port: 80, protocol: 'tcp', state: 'open', service: 'http', version: 'nginx 1.18.0' },
+      },
+      {
+        category: 'known-vulnerabilities',
+        severity: 'high',
+        rawValue: 'CVE-2022-12345 (CVSS 7.5)',
+        // Description menciona "nginx 1.18.0:" pero el vulnInfo dice version 1.20.0
+        description: '[coincidencia aproximada] nginx 1.18.0: some vulnerability here',
+        vulnInfo: {
+          cveId: 'CVE-2022-12345',
+          cvssScore: 7.5,
+          kevKnownExploited: false,
+          product: 'nginx',
+          version: '1.20.0', // Versión diferente a la del servicio
+        },
+      },
+    ];
+
+    const result = correlateFindings(findings);
+    const verCve = result.find(f => f.rawValue?.includes('↔ CVE-2022-12345'));
+
+    // No debe correlacionar: el campo dice version 1.20.0, no 1.18.0
+    expect(verCve).toBeUndefined();
+  });
+
+  it('retrocompatibilidad: un CVE sin vulnInfo sigue correlacionando por fallback de substring', () => {
+    const findings: Finding[] = [
+      {
+        category: 'port-service',
+        severity: 'low',
+        rawValue: '80/tcp nginx',
+        description: 'Puerto 80 abierto con nginx.',
+        serviceInfo: { port: 80, protocol: 'tcp', state: 'open', service: 'nginx', version: '1.18.0' },
+      },
+      {
+        category: 'known-vulnerabilities',
+        severity: 'critical',
+        rawValue: 'CVE-2021-23017 (CVSS 9.4)',
+        // El patrón de substring "nginx 1.18.0:" está presente en la descripción
+        description: '[coincidencia aproximada] nginx 1.18.0: nginx resolver vulnerability.',
+        // Sin vulnInfo → debe usar el fallback de substring
+      },
+    ];
+
+    const result = correlateFindings(findings);
+    const verCve = result.find(f => f.rawValue?.includes('↔ CVE-2021-23017'));
+
+    expect(verCve).toBeDefined();
+    expect(verCve!.correlationInfo).toEqual({ rule: 'version-with-cves', emergent: false });
+  });
+});

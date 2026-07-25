@@ -78,8 +78,8 @@ function isInsecureValue(headerName: string, value: string): boolean {
     }
 
     case 'x-content-type-options': {
-      // Solo "nosniff" es un valor seguro
-      const trimmed = normalizedValue.replace(/\s/g, '');
+      // Solo "nosniff" es un valor seguro (case-insensitive, trim extremos)
+      const trimmed = normalizedValue.trim();
       return trimmed !== 'nosniff';
     }
 

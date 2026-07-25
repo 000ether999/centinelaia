@@ -303,7 +303,7 @@ function renderScanHistory(scans) {
             riskLevel: null,
             explanations: [],
             recommendations: [],
-            metadata: undefined,
+            metadata: { timestamp: detail.timestamp, executionMode: undefined, status: detail.status },
           });
         } catch (error) {
           setStatus(elements.historyStatus, error.message, true);
