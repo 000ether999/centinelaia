@@ -99,8 +99,9 @@ PORT    STATE SERVICE VERSION
     const result: AnalysisResult = JSON.parse(response.body);
 
     // Debe cubrir findings de las fuentes fusionadas: 1 del scanner + 2 de nmap
-    // + 1 de correlación determinista (puerto 443/https ↔ debilidad TLS) = 4 total
-    expect(result.explanations.length).toBe(4);
+    // + 1 de correlación determinista (puerto 443/https ↔ debilidad TLS)
+    // + 1 informativo de verificación CVE inconclusa (Ola 11) = 5 total
+    expect(result.explanations.length).toBe(5);
     // El primero corresponde al finding de TLS (del scanner)
     expect(result.explanations[0]!.findingIndex).toBe(0);
     // Los de Nmap están en posiciones 1 y 2
@@ -139,8 +140,8 @@ PORT    STATE SERVICE VERSION
     expect(response.statusCode).toBe(200);
     const result: AnalysisResult = JSON.parse(response.body);
 
-    // 1 scanner + 1 nmap + 1 correlación = 3
-    expect(result.explanations.length).toBe(3);
+    // 1 scanner + 1 nmap + 1 correlación + 1 informativo verificación inconclusa (Ola 11) = 4
+    expect(result.explanations.length).toBe(4);
   });
 
   it('should work with nmapOutput only (no scanner findings in body)', async () => {

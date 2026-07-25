@@ -3,6 +3,9 @@
  * Calcula un score de riesgo compuesto (0-100) basado en la severidad
  * y diversidad de categorías de los hallazgos. El resultado es independiente
  * del orden de entrada — garantiza determinismo.
+ *
+ * Ola 11: acumulación con retorno decreciente, suelo por severidad verificada
+ * (modelo SSL Labs) y separación higiene/exposición.
  */
 
 import type { Finding, FindingSeverity, FindingCategory } from '../scanner/modules/types.js';
@@ -50,6 +53,53 @@ const MULTIPLIER_CVE_KEV = 1.0;
  * directamente por los módulos de escaneo propios.
  */
 const MULTIPLIER_DEFAULT = 1.0;
+
+// ─── Ola 11: Decaimiento geométrico ─────────────────────────────────────────
+
+/**
+ * Factor de decaimiento geométrico para la acumulación de pesos.
+ * Cada hallazgo adicional aporta DECAY^i de su peso efectivo (i = posición
+ * en el arreglo ordenado de mayor a menor). Así el hallazgo más grave aporta
+ * su peso completo, el segundo el 60%, el tercero el 36%, etc.
+ * Esto evita que acumular ruido supere hallazgos graves aislados.
+ */
+const ACCUMULATION_DECAY = 0.6;
+
+// ─── Ola 11: Suelo por severidad verificada (modelo SSL Labs) ────────────────
+
+/**
+ * Suelos de score por severidad efectiva.
+ * La presencia de un hallazgo grave verificado garantiza una banda mínima,
+ * análogo al mecanismo de SSL Labs donde el peor hallazgo pone techo a la nota.
+ * - critical (verificado): banda F (≥81)
+ * - high (verificado): banda C (≥41)
+ * - medium (verificado): banda B (≥21)
+ * - low/info: sin suelo
+ */
+const SEVERITY_SCORE_FLOOR: Record<FindingSeverity, number> = {
+  critical: 81,
+  high: 41,
+  medium: 21,
+  low: 0,
+  info: 0,
+};
+
+// ─── Ola 11: Separación higiene vs exposición ────────────────────────────────
+
+/**
+ * Categorías de higiene: mala configuración, no explotable directamente.
+ * Representan deuda técnica o configuración subóptima, no riesgo inmediato.
+ */
+const HYGIENE_CATEGORIES: ReadonlySet<FindingCategory> = new Set([
+  'http-headers',
+  'security-txt',
+  'server-fingerprint',
+  'dns-security',
+]);
+
+// Todo lo demás (tls-ssl, cookies, cors, http-methods, security-exposure,
+// known-vulnerabilities, port-service, log-analysis, correlation) cuenta como
+// exposición (riesgo explotable).
 
 /** Retorna el multiplicador de score base según el finding (categoría + metadatos) */
 function getFindingMultiplier(finding: Finding): number {
@@ -123,6 +173,10 @@ export interface RiskScoreResult {
   riskScore: number;
   riskLevel: RiskLevel;
   grade: RiskGrade;
+  /** Score parcial solo de categorías de higiene (Ola 11) */
+  hygieneScore: number;
+  /** Score parcial solo de categorías de exposición/riesgo explotable (Ola 11) */
+  exposureScore: number;
 }
 
 /**
@@ -132,41 +186,135 @@ export interface RiskScoreResult {
 export function calculateRiskScore(findings: Finding[]): RiskScoreResult {
   // Caso base: sin findings
   if (findings.length === 0) {
-    return { riskScore: 0, riskLevel: 'minimal', grade: 'A' };
+    return { riskScore: 0, riskLevel: 'minimal', grade: 'A', hygieneScore: 0, exposureScore: 0 };
   }
 
-  // Paso 1: Calcular score base (suma de pesos por severidad, tope 100)
+  // Score global (todos los findings)
+  const globalScore = computeScoreForSubset(findings);
+
+  // Scores parciales: higiene y exposición (Ola 11, Tarea 3)
+  const hygieneFindings = findings.filter(f => HYGIENE_CATEGORIES.has(f.category));
+  const exposureFindings = findings.filter(f => !HYGIENE_CATEGORIES.has(f.category));
+  const hygieneScore = computeScoreForSubset(hygieneFindings);
+  const exposureScore = computeScoreForSubset(exposureFindings);
+
+  // Determinar nivel de riesgo y grado a partir del score global
+  const riskLevel = determineRiskLevel(globalScore);
+  const grade = determineGrade(globalScore);
+
+  return { riskScore: globalScore, riskLevel, grade, hygieneScore, exposureScore };
+}
+
+/**
+ * Calcula el score final para un subconjunto de findings aplicando:
+ * 1. Acumulación con decaimiento geométrico (Ola 11, Tarea 1)
+ * 2. Factor de diversidad
+ * 3. Suelo por severidad verificada (Ola 11, Tarea 2)
+ */
+function computeScoreForSubset(findings: Finding[]): number {
+  if (findings.length === 0) return 0;
+
+  // Paso 1: Calcular score base con decaimiento geométrico
   const baseScore = calculateBaseScore(findings);
 
   // Paso 2: Calcular factor de diversidad
   const diversityFactor = calculateDiversityFactor(findings);
 
-  // Paso 3: Aplicar diversidad al score base y limitar a 100
-  const finalScore = Math.min(
+  // Paso 3: Aplicar diversidad al score base
+  const calculatedScore = Math.min(
     Math.round(baseScore * (1 + diversityFactor)),
     100
   );
 
-  // Paso 4: Determinar nivel de riesgo
-  const riskLevel = determineRiskLevel(finalScore);
+  // Paso 4: Suelo por severidad verificada (Ola 11, Tarea 2)
+  const floor = calculateFloor(findings);
 
-  // Paso 5: Determinar grado compuesto (A–F)
-  const grade = determineGrade(finalScore);
-
-  return { riskScore: finalScore, riskLevel, grade };
+  // El score final es el mayor entre el calculado y el suelo
+  return Math.min(100, Math.max(calculatedScore, floor));
 }
 
 /**
- * Calcula el score base: MIN(suma(peso × multiplicador), 100).
- * El multiplicador por finding reduce o elimina el aporte de findings
- * que no representan riesgo verificado de forma independiente.
+ * Calcula el score base con acumulación de decaimiento geométrico (Ola 11).
+ * 1. Calcula el peso efectivo de cada finding: SEVERITY_WEIGHTS[severity] × getFindingMultiplier(finding)
+ * 2. Descarta pesos efectivos iguales a 0.
+ * 3. Ordena de mayor a menor (garantiza determinismo).
+ * 4. Acumula: sum += peso[i] × DECAY^i
  */
 function calculateBaseScore(findings: Finding[]): number {
-  let sum = 0;
+  // Calcular pesos efectivos y descartar los que son 0
+  const weights: number[] = [];
   for (const finding of findings) {
-    sum += SEVERITY_WEIGHTS[finding.severity] * getFindingMultiplier(finding);
+    const w = SEVERITY_WEIGHTS[finding.severity] * getFindingMultiplier(finding);
+    if (w > 0) {
+      weights.push(w);
+    }
   }
-  return Math.min(sum, 100);
+
+  // Ordenar de mayor a menor para determinismo y para que el más grave aporte completo
+  weights.sort((a, b) => b - a);
+
+  // Acumular con decaimiento geométrico
+  let sum = 0;
+  for (let i = 0; i < weights.length; i++) {
+    sum += weights[i]! * Math.pow(ACCUMULATION_DECAY, i);
+  }
+
+  return sum;
+}
+
+/**
+ * Calcula el suelo de score basado en la severidad efectiva de los findings.
+ *
+ * La severidad efectiva para el suelo depende del multiplicador:
+ * - multiplicador >= 1.0 (verificado: módulos scanner, CVE KEV, correlación emergente)
+ *   → su severidad tal cual.
+ * - multiplicador > 0 y < 1.0 (CVE aproximado NVD, sin verificar)
+ *   → degrada dos escalones (critical→medium, high→low, medium→info, low→info).
+ * - multiplicador === 0 (correlación no emergente, duplicado)
+ *   → excluido del suelo.
+ */
+function calculateFloor(findings: Finding[]): number {
+  let maxFloor = 0;
+
+  for (const finding of findings) {
+    const multiplier = getFindingMultiplier(finding);
+
+    if (multiplier === 0) {
+      // Excluido del suelo
+      continue;
+    }
+
+    let effectiveSeverity: FindingSeverity;
+
+    if (multiplier >= 1.0) {
+      // Verificado: su severidad tal cual
+      effectiveSeverity = finding.severity;
+    } else {
+      // No verificado (multiplicador > 0 y < 1.0): degradar dos escalones
+      effectiveSeverity = degradeTwoSteps(finding.severity);
+    }
+
+    const floor = SEVERITY_SCORE_FLOOR[effectiveSeverity];
+    if (floor > maxFloor) {
+      maxFloor = floor;
+    }
+  }
+
+  return maxFloor;
+}
+
+/**
+ * Degrada una severidad dos escalones.
+ * critical → medium, high → low, medium → info, low → info, info → info
+ */
+function degradeTwoSteps(severity: FindingSeverity): FindingSeverity {
+  switch (severity) {
+    case 'critical': return 'medium';
+    case 'high': return 'low';
+    case 'medium': return 'info';
+    case 'low': return 'info';
+    case 'info': return 'info';
+  }
 }
 
 /**

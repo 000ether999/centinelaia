@@ -45,6 +45,10 @@ export interface AnalysisResult {
   storageTruncated?: boolean;
   /** Findings analizados (los mismos que indexan explanations[].findingIndex). */
   findings?: Finding[];
+  /** Score parcial solo de categorías de higiene (Ola 11, opcional para retrocompatibilidad). */
+  hygieneScore?: number;
+  /** Score parcial solo de categorías de exposición/riesgo explotable (Ola 11, opcional para retrocompatibilidad). */
+  exposureScore?: number;
 }
 
 /** Niveles de riesgo derivados del score */

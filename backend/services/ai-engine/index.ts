@@ -154,7 +154,7 @@ export async function analyzeFindings(
     }
 
     const prioritizedRecommendations = prioritizeRecommendations(recommendations, findings);
-    const { riskScore, riskLevel, grade } = calculateRiskScore(findings);
+    const { riskScore, riskLevel, grade, hygieneScore, exposureScore } = calculateRiskScore(findings);
     const metadata: AnalysisMetadata = {
       timestamp: new Date().toISOString(),
       modelId,
@@ -179,6 +179,8 @@ export async function analyzeFindings(
       truncatedCount: validation.truncatedCount,
       // Incluir los findings sanitizados para que findingIndex los indexe correctamente
       findings,
+      hygieneScore,
+      exposureScore,
     };
 
     // cache.put se llama DESPUÉS de asignar result.findings,

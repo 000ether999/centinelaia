@@ -122,10 +122,12 @@ describe('AI Engine — Timeout global y degradación', () => {
       expect(analysisResult['degraded']).toBe(true);
 
       // 5. El Risk Score es correcto (calculado con fórmula determinista)
-      // 1 critical (25) + 1 high (15) + 1 medium (8) = 48 base
-      // Diversidad: 3 categorías con medium+ → +30% → 48 * 1.3 = 62.4 → 62
-      expect(analysisResult['riskScore']).toBe(62);
-      expect(analysisResult['riskLevel']).toBe('high');
+      // Ola 11: decaimiento geométrico + suelo por severidad verificada.
+      // Pesos: critical=25, high=15, medium=8. Decay: 25 + 9 + 2.88 = 36.88
+      // Diversidad: 3 categorías → 0.30 → round(36.88*1.3) = 48
+      // Suelo: tls-ssl critical verificado (mult 1.0) → 81. max(48, 81) = 81
+      expect(analysisResult['riskScore']).toBe(81);
+      expect(analysisResult['riskLevel']).toBe('critical');
 
       // 6. Tiene explicaciones (fallback) para cada finding
       const explanations = analysisResult['explanations'] as Array<unknown>;

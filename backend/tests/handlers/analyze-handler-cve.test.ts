@@ -145,9 +145,10 @@ describe('POST /analyze — CVE enrichment (gap closure)', () => {
     expect(response.statusCode).toBe(200);
     const result: AnalysisResult = JSON.parse(response.body);
 
-    // Sin CVEs: solo queda el finding derivado de Nmap (servicio https)
-    expect(result.explanations.length).toBe(1);
-    // Ninguna explicación debe corresponder a la categoría known-vulnerabilities
+    // Ola 11: sin CVEs reales, pero se emite un finding info de verificación inconclusa.
+    // El finding de Nmap (servicio) + el finding informativo = 2 explanations.
+    expect(result.explanations.length).toBe(2);
+    // Ninguna explicación debe corresponder a un CVE real
     const cveExplanation = result.explanations.find((e) => /CVE-\d{4}-\d+/.test(e.text));
     expect(cveExplanation).toBeUndefined();
   });
