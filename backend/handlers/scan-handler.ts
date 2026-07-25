@@ -18,6 +18,8 @@ import { createFingerprinter } from '../services/scanner/modules/fingerprinter.j
 import { createCorsChecker } from '../services/scanner/modules/cors-checker.js';
 import { createHttpMethodsChecker } from '../services/scanner/modules/http-methods-checker.js';
 import { createSecurityTxtChecker } from '../services/scanner/modules/security-txt-checker.js';
+import { createRedirectChecker } from '../services/scanner/modules/redirect-checker.js';
+import { createSecurityExposureChecker } from '../services/scanner/modules/security-exposure-checker.js';
 import type { ScanResult, ConsentEvidence } from '../models/scan.js';
 import type { ScanModuleInput } from '../services/scanner/modules/types.js';
 import { enrichWithCves } from '../services/cve-enricher/index.js';
@@ -127,7 +129,7 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     timeoutMs: 5000,
   };
 
-  // Configurar orquestador con los 8 módulos registrados
+  // Configurar orquestador con los 10 módulos registrados
   const config: OrchestratorConfig = {
     moduleTimeoutMs: 5000,
     globalTimeoutMs: 25000,
@@ -140,6 +142,8 @@ async function handlePostScan(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       createCorsChecker(),
       createHttpMethodsChecker(),
       createSecurityTxtChecker(),
+      createRedirectChecker(),
+      createSecurityExposureChecker(),
     ],
   };
 

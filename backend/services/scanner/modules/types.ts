@@ -19,7 +19,8 @@ export type FindingCategory =
   | 'security-txt'
   | 'log-analysis'
   | 'known-vulnerabilities'
-  | 'correlation';
+  | 'correlation'
+  | 'security-exposure';
 
 /**
  * Niveles de severidad ordenados de mayor a menor impacto.

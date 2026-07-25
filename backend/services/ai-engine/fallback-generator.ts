@@ -22,6 +22,7 @@ const CATEGORY_DESCRIPTIONS: Record<FindingCategory, string> = {
   'log-analysis': 'eventos de seguridad en logs de autenticación',
   'known-vulnerabilities': 'vulnerabilidades conocidas (CVE) en software detectado',
   'correlation': 'coincidencias detectadas entre distintas fuentes de información (scanner y logs)',
+  'security-exposure': 'exposición de recursos sensibles del servidor',
 };
 
 const CATEGORY_RECOMMENDATIONS: Record<FindingCategory, string> = {
@@ -37,6 +38,7 @@ const CATEGORY_RECOMMENDATIONS: Record<FindingCategory, string> = {
   'log-analysis': 'Endurecer el acceso SSH: deshabilitar login de root, usar autenticación por llaves en lugar de contraseñas, configurar fail2ban para bloqueo automático y limitar las IPs que pueden conectarse al servicio.',
   'known-vulnerabilities': 'actualizar/parchear el software a una versión que corrija la vulnerabilidad; revisar el aviso del CVE',
   'correlation': 'Revisar en conjunto los hallazgos relacionados entre fuentes: suelen indicar el mismo servicio o vulnerabilidad vista desde ángulos distintos, por lo que priorizar su corrección reduce el riesgo en múltiples frentes a la vez.',
+  'security-exposure': 'Bloquear o eliminar el acceso a rutas sensibles (.git, .env, phpinfo.php) mediante reglas del servidor web o eliminando los archivos del directorio público.',
 };
 
 const SEVERITY_URGENCY: Record<FindingSeverity, string> = {
