@@ -14,6 +14,55 @@ CentinelaIA es un auditor de seguridad web serverless que inspecciona encabezado
 - **Export de resultados:** el panel de resultados incluye botones para exportar el análisis como JSON descargable o PDF (vía `window.print()`), sin dependencias adicionales.
 - **Frontend estático:** interfaz web ligera servida por CloudFront, con confirmación de autorización obligatoria antes de escanear.
 
+## Naturaleza del escaneo (pasivo y semi-activo)
+
+La mayoría de los checks son **pasivos**: leen lo que el objetivo ya publica en la
+respuesta que se le pide (cabeceras HTTP, certificado y cifrado TLS, cookies,
+registros DNS, tecnología expuesta). No prueban vulnerabilidades ni envían
+cargas maliciosas.
+
+El módulo de **exposición de recursos** (`security-exposure`) es la excepción:
+realiza sondeo **semi-activo** de rutas que el objetivo no publica
+(`/.git/HEAD`, `/.env`, `/phpinfo.php`) para comprobar si son accesibles. Son
+peticiones GET normales, pero algunos WAF y sistemas de detección registran ese
+patrón como intento de intrusión y pueden generar bloqueos o reportes de abuso
+contra quien escanea. Por eso la herramienta exige confirmación explícita de
+autorización antes de cualquier escaneo, y la registra como evidencia
+(`ConsentEvidence`) junto al resultado.
+
+Úsala únicamente sobre activos propios, laboratorios o sistemas para los que
+tengas autorización expresa.
+
+## Modo laboratorio (CLI)
+
+La API pública **bloquea objetivos privados por diseño** (protección anti-SSRF en
+tres capas: validación de entrada, lista de rangos reservados y validación en el
+conector antes de abrir el socket). Eso es correcto para un servicio expuesto a
+internet, pero impide auditar un laboratorio propio.
+
+Para eso existe un CLI que ejecuta los 10 módulos del escáner **en tu máquina** y
+envía los hallazgos al motor de análisis:
+
+```bash
+npm run lab -- --target http://127.0.0.1:8081 --authorize
+```
+
+Opciones:
+
+- `--target <url|host[:port]>` — objetivo (obligatorio). En este modo se aceptan
+  `localhost`, hosts sin TLD y `host:puerto`.
+- `--authorize` — **obligatorio**. Equivale a la casilla de autorización del
+  frontend y queda registrado en el resultado. Sin este flag el CLI no ejecuta.
+- `--session-id <id>` — identificador de sesión para agrupar el historial.
+- `--base-url <url>` — envía los hallazgos a un despliegue remoto en vez de
+  procesarlos en el proceso local.
+- `--out <ruta>` — guarda el resultado completo en JSON.
+
+El modo se activa con la variable `CENTINELAIA_ALLOW_PRIVATE_TARGETS=true`, que el
+propio CLI establece en su proceso. Esa variable **se ignora cuando el código corre
+en AWS Lambda**: la protección del servicio público no puede desactivarse por una
+variable de entorno mal configurada en el despliegue.
+
 ## Categorías de hallazgos
 
 | Categoría | Fuente |
